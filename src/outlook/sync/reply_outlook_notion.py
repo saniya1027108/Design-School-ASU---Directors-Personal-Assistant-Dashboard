@@ -1,19 +1,28 @@
 # reply_outlook_notion.py  (updated to fix truncation and improve reliability)
 
 import sys
+from pathlib import Path
 import os
 
-# --- Fix sys.path so 'outlook.utils' and 'outlook_read' are importable ---
-current_file = os.path.abspath(__file__)
-project_root = os.path.abspath(os.path.join(current_file, "../../../.."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# --- Fix sys.path using pathlib for cross-platform compatibility ---
+current_file = Path(__file__).resolve()
+# Navigate up to src directory: reply_outlook_notion.py -> sync/-> outlook/ -> src/
+src_root = current_file.parent.parent.parent
+# Navigate up to project root
+project_root = src_root.parent
+
+if str(src_root) not in sys.path:
+    sys.path.insert(0, str(src_root))
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 # ------------------------------------------------------------------------
 
 from dotenv import load_dotenv
-from openai import OpenAI  # Using OpenAI for replies (consistent with your summarization choice)
+from openai import OpenAI
 import requests
 import textwrap
+import re
+from html import unescape
 
 from outlook.utils.outlook_auth import get_token
 from .outlook_read import fetch_message
@@ -25,10 +34,9 @@ load_dotenv()
 
 # Load organization chart for sender name/category lookup
 def load_org_chart():
-    current_file = os.path.abspath(__file__)
-    # Point to src/outlook/config/organization_chart.json
-    config_path = os.path.abspath(os.path.join(current_file, "../../config/organization_chart.json"))
-    if os.path.exists(config_path):
+    """Load organization_chart.json from config directory"""
+    config_path = current_file.parent.parent / "config" / "organization_chart.json"
+    if config_path.exists():
         with open(config_path, "r") as f:
             return json.load(f)
     print(f"⚠️ organization_chart.json not found at {config_path}. Sender lookup will be limited.")
@@ -44,6 +52,61 @@ def lookup_sender_category(sender_email):
     return None
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Use same key as summarization
+
+
+def sanitize_html_model_output(text: str) -> str:
+    """
+    Remove markdown/code fences and stray language tags like ```html or '''html.
+    Keep only raw HTML content.
+    """
+    if not text:
+        return ""
+
+    s = text.strip()
+
+    # If wrapped in triple backticks with optional language (```html ... ```
+    if s.lower().startswith("```"):
+        # remove first fence line
+        parts = s.split("\n", 1)
+        s = parts[1] if len(parts) > 1 else ""
+        # remove closing fence if present
+        if s.strip().endswith("```"):
+            s = s[: s.rfind("```")].strip()
+
+    # If wrapped in triple single quotes ('''html ... ''')
+    elif s.lower().startswith("'''"):
+        parts = s.split("\n", 1)
+        s = parts[1] if len(parts) > 1 else ""
+        if s.strip().endswith("'''"):
+            s = s[: s.rfind("'''")].strip()
+
+    # Remove any leading 'html' language token
+    if s.lower().startswith("html"):
+        s = s[4:].lstrip()
+
+    # Remove any remaining lone fences inside
+    s = re.sub(r"```+|'''+", "", s)
+
+    return s.strip()
+
+
+def html_to_text(html: str) -> str:
+    """
+    Convert simple HTML emails to readable plain text for Notion display.
+    """
+    if not html:
+        return ""
+    txt = html
+    # normalize breaks and paragraphs
+    txt = re.sub(r"(?i)<br\s*/?>", "\n", txt)
+    txt = re.sub(r"(?i)</p\s*>", "\n\n", txt)
+    txt = re.sub(r"(?i)<p[^>]*>", "", txt)
+    # strip remaining tags
+    txt = re.sub(r"<[^>]+>", "", txt)
+    # unescape entities and collapse excessive newlines
+    txt = unescape(txt)
+    txt = re.sub(r"\n{3,}", "\n\n", txt)
+    return txt.strip()
 
 
 def generate_reply(instruction, original_body, sender_name, sender_category=None):
@@ -64,6 +127,7 @@ You are Paula Sanguinetti, Director of The Design School at Arizona State Univer
 Write a complete, warm, professional email reply in clean HTML format.
 
 Requirements:
+- Output must be RAW HTML only. Do not wrap in Markdown code fences. Do not prefix with language names like 'html'.
 - Start with a personalized greeting: "Dear {sender_name}," or "Hi {sender_name.split()[0]}," if appropriate.
 - Directly and clearly address the director's instruction.
 - Keep tone polite, positive, and concise.
@@ -100,6 +164,10 @@ Now write ONLY the full HTML email body:
             max_tokens=800
         )
         reply_html = response.choices[0].message.content.strip()
+
+        # NEW: sanitize out any code fences or language tokens
+        reply_html = sanitize_html_model_output(reply_html)
+
         # Safety check: ensure signature is present and response is not truncated
         if "Paula Sanguinetti" not in reply_html:
             reply_html += textwrap.dedent("""
@@ -179,8 +247,12 @@ def process_pending_replies():
 
         try:
             reply_html = generate_reply(instruction, original_body, sender_name, sender_category)
+            # send sanitized HTML
             send_reply(message_id, reply_html)
-            update_notion_sent(page["id"], reply_html)
+
+            # NEW: save plain text to Notion to avoid showing HTML tags
+            reply_text_for_notion = html_to_text(reply_html)
+            update_notion_sent(page["id"], reply_text_for_notion)
 
             subject = props["Subject"]["title"][0]["text"]["content"]
             print(f"Replied to: {subject}")

@@ -153,7 +153,7 @@ def create_email(data):
             "Priority": {"select": {"name": data["priority"]}},
             "Category": {"select": {"name": notion_category}} ,
             "Message ID": {"rich_text": [{"text": {"content": data["thread_id"]}}]},
-            "Status": {"select": {"name": "New"}},
+            "Draft Status": {"select": {"name": "New"}},
             "Response Effort": {"select": {"name": response_effort}},
         }
     }
@@ -196,3 +196,126 @@ def update_notion_sent(page_id, sent_body):
     }
     resp = requests.patch(url, headers=HEADERS, json=payload)
     resp.raise_for_status()
+
+def save_draft_reply(page_id, draft_html):
+    """Save the drafted reply to Notion for review"""
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    # Truncate draft for display (Notion rich_text limit is 2000 chars)
+    display_draft = draft_html[:1900] + "..." if len(draft_html) > 1900 else draft_html
+    
+    payload = {
+        "properties": {
+            "Draft Reply": {
+                "rich_text": [{"text": {"content": display_draft}}]
+            },
+            "Draft Status": {
+                "select": {"name": "Pending Review"}
+            }
+        }
+    }
+    
+    resp = requests.patch(url, headers=headers, json=payload)
+    resp.raise_for_status()
+    print(f"✅ Draft saved to Notion for review")
+
+
+def get_approved_drafts():
+    """Get emails where draft is approved for sending"""
+    url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    payload = {
+        "filter": {
+            "property": "Draft Status",
+            "select": {"equals": "Approved"}
+        }
+    }
+    
+    resp = requests.post(url, headers=headers, json=payload)
+    resp.raise_for_status()
+    return resp.json().get("results", [])
+
+
+def get_revision_requests():
+    """Get emails where user requested revisions to the draft"""
+    url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    payload = {
+        "filter": {
+            "and": [
+                {"property": "Draft Status", "select": {"equals": "Needs Revision"}},
+                {"property": "Revision Notes", "rich_text": {"is_not_empty": True}}
+            ]
+        }
+    }
+    
+    resp = requests.post(url, headers=headers, json=payload)
+    resp.raise_for_status()
+    return resp.json().get("results", [])
+
+
+def mark_draft_sent(page_id, final_reply):
+    """Mark the draft as sent after successful email delivery"""
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    payload = {
+        "properties": {
+            "Draft Status": {
+                "select": {"name": "Sent"}
+            },
+            "Draft Reply": {
+                "rich_text": [{"text": {"content": final_reply[:1900]}}]
+            }
+        }
+    }
+    
+    resp = requests.patch(url, headers=headers, json=payload)
+    resp.raise_for_status()
+
+
+def get_pending_replies():
+    """Get emails that need reply instructions or draft generation"""
+    url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
+    headers = {
+        "Authorization": f"Bearer {NOTION_API_KEY}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
+    
+    payload = {
+        "filter": {
+            "and": [
+                {"property": "Reply Instruction", "rich_text": {"is_not_empty": True}},
+                {
+                    "or": [
+                        {"property": "Draft Status", "select": {"is_empty": True}},
+                        {"property": "Draft Status", "select": {"does_not_equal": "Sent"}}
+                    ]
+                }
+            ]
+        }
+    }
+    
+    resp = requests.post(url, headers=headers, json=payload)
+    resp.raise_for_status()
+    return resp.json().get("results", [])

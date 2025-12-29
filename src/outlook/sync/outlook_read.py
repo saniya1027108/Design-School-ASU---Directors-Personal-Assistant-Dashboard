@@ -1,12 +1,19 @@
 import sys
-import os
+from pathlib import Path
 import json
+import os
 
-# --- Fix sys.path so 'outlook.utils' is importable ---
-current_file = os.path.abspath(__file__)
-project_root = os.path.abspath(os.path.join(current_file, "../../../.."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# --- Fix sys.path using pathlib for cross-platform compatibility ---
+current_file = Path(__file__).resolve()
+# Navigate up to src directory: outlook_read.py -> sync/ -> outlook/ -> src/
+src_root = current_file.parent.parent.parent
+# Navigate up to project root
+project_root = src_root.parent
+
+if str(src_root) not in sys.path:
+    sys.path.insert(0, str(src_root))
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 # -----------------------------------------------------
 
 import requests
@@ -112,9 +119,9 @@ def fetch_message(message_id):
 
 
 def load_keywords():
-    current_file = os.path.abspath(__file__)
-    config_path = os.path.abspath(os.path.join(current_file, "../../config/keywords.json"))
-    if os.path.exists(config_path):
+    """Load keywords.json from config directory"""
+    config_path = current_file.parent.parent / "config" / "keywords.json"
+    if config_path.exists():
         with open(config_path, "r") as f:
             return json.load(f)
     print(f"⚠️ keywords.json not found at {config_path}.")
