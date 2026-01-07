@@ -20,6 +20,7 @@ if str(project_root) not in sys.path:
 from .outlook_read import fetch_message
 from outlook.utils.utils_notion import get_revision_requests, save_draft_reply
 from .draft_replies import generate_draft_reply, lookup_sender_category
+from outlook.sync.sync_outlook_notion import _set_workflow_status_by_message_id, update_workflow_status_from_draft_status
 
 
 def process_revisions():
@@ -43,6 +44,9 @@ def process_revisions():
         revision_notes = props["Revision Notes"]["rich_text"][0]["text"]["content"]
         
         try:
+            # Set workflow status to "Revising"
+            _set_workflow_status_by_message_id(message_id, "Revising")
+
             # Fetch original message
             original = fetch_message(message_id)
             original_body = original["body"]["content"]
@@ -61,12 +65,16 @@ def process_revisions():
             
             # Save revised draft to Notion
             save_draft_reply(page_id, revised_draft)
-            
+
+            # After saving, update workflow status based on current draft status
+            update_workflow_status_from_draft_status(message_id)
+
             subject = props["Subject"]["title"][0]["text"]["content"]
             print(f"✅ Revised draft for: {subject[:50]}...")
             revision_count += 1
             
         except Exception as e:
+            _set_workflow_status_by_message_id(message_id, "Error")
             print(f"❌ Error processing revision for {message_id}: {e}")
     
     print(f"\n✅ Processed {revision_count} revision(s)")

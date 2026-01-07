@@ -20,6 +20,7 @@ if str(project_root) not in sys.path:
 import requests
 from outlook.utils.outlook_auth import get_token
 from outlook.utils.utils_notion import get_approved_drafts, mark_draft_sent
+from outlook.sync.sync_outlook_notion import _set_workflow_status_by_message_id
 
 
 def send_reply(message_id, reply_body):
@@ -75,17 +76,24 @@ def send_approved_replies():
         draft_reply = props["Draft Reply"]["rich_text"][0]["text"]["content"]
         
         try:
+            # Set workflow status to "Sending" before sending
+            _set_workflow_status_by_message_id(message_id, "Sending")
+
             # Send the approved draft
             send_reply(message_id, draft_reply)
             
             # Mark as sent in Notion
             mark_draft_sent(page_id, draft_reply)
+
+            # Set workflow status to "Complete" after marking as sent
+            _set_workflow_status_by_message_id(message_id, "Complete")
             
             subject = props["Subject"]["title"][0]["text"]["content"]
             print(f"✅ Sent reply for: {subject[:50]}...")
             sent_count += 1
             
         except Exception as e:
+            _set_workflow_status_by_message_id(message_id, "Error")
             print(f"❌ Error sending reply for {message_id}: {e}")
     
     print(f"\n✅ Sent {sent_count} reply(ies)")

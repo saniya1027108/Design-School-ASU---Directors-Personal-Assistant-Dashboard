@@ -5,7 +5,7 @@ import os
 
 # --- Fix sys.path using pathlib for cross-platform compatibility ---
 current_file = Path(__file__).resolve()
-# Navigate up to src directory: outlook_read.py -> sync/ -> outlook/ -> src/
+# Navigate up to src directory: outlook_read.py -> sync/-> outlook/ -> src/
 src_root = current_file.parent.parent.parent
 # Navigate up to project root
 project_root = src_root.parent
@@ -27,49 +27,43 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 domain = USER.split('@')[-1] if USER else ""
 
-def determine_category_and_priority(sender, subject, snippet, full_body=""):
-    sender_lower = sender.lower()
-    subject_lower = subject.lower()
-    snippet_lower = snippet.lower()
-    body_lower = full_body.lower() if full_body else ""
+# Load organization chart for category lookup
+def load_org_chart():
+    config_path = current_file.parent.parent / "config" / "organization_chart.json"
+    if config_path.exists():
+        with open(config_path, "r") as f:
+            return json.load(f)
+    print(f"⚠️ organization_chart.json not found at {config_path}.")
+    return {}
 
-    # Priority keywords (Critical if any of these appear)
-    critical_keywords = ["important", "asap", "urgent", "deadline", "time sensitive", "immediately"]
-    if any(kw in subject_lower or kw in snippet_lower or kw in body_lower for kw in critical_keywords):
-        priority = "Critical"
-    else:
-        priority = "Others"
+ORG_CHART = load_org_chart()
 
-    # Category detection – highest precedence first
-    if any(kw in sender_lower or kw in body_lower for kw in ["assistant director"]):
-        return "Assistant Directors", priority
+def lookup_sender_category(sender_email):
+    sender_email = sender_email.lower()
+    for category, people in ORG_CHART.items():
+        for name, email in people.items():
+            if sender_email == email.lower():
+                return category
+    return "Others"
 
-    if any(kw in sender_lower or kw in body_lower for kw in ["program head", "head of program", "associate head"]):
-        return "Program Heads", priority
-
-    if any(kw in sender_lower or kw in body_lower for kw in ["special program leadership", "program leader"]):
-        return "Special Program Leadership", priority
-
-    if any(kw in sender_lower or kw in body_lower for kw in ["staff leadership", "staff lead"]):
-        return "Staff Leadership", priority
-
-    if any(kw in sender_lower or kw in body_lower for kw in ["faculty", "professor", "lecturer", "clinical"]):
-        return "Faculty", priority
-
-    if sender_lower.endswith('@' + domain):
-        return "Employees", "Internal"
-
-    # Parents / Students (External)
-    external_keywords = ["parent", "mom", "dad", "daughter", "son"]
-    if any(kw in snippet_lower or kw in body_lower for kw in external_keywords):
-        return "Parents", "External"
-
-    # Students / Alumni
-    student_keywords = ["student", "alumnus", "graduate", "alumni"]
-    if any(kw in sender_lower or kw in body_lower for kw in student_keywords):
-        return "Students", "Others / Students"
-
-    return "Others", priority
+def determine_category_and_priority(sender_email, subject, snippet, full_body=""):
+    category = lookup_sender_category(sender_email)
+    # Priority mapping as per user request
+    priority_map = {
+        "Assistant Director": "Vips",
+        "Associate Director": "Vips",
+        "VIPs": "Vips",
+        "Program Head": "Critical",
+        "Director of Special Program": "Critical",
+        "Faculty": "Critical",
+        "FA": "Critical",
+        "Staff": "Internal",
+        "Manager": "Internal",
+        "Part Time Staff": "Internal",
+        "Student Worker": "Internal",
+    }
+    priority = priority_map.get(category, "Others")
+    return category, priority
 
 
 def fetch_unread_emails():
@@ -93,7 +87,7 @@ def fetch_unread_emails():
         received_at = m.get("receivedDateTime")
         full_body = m.get("body", {}).get("content", "") or snippet
 
-        category, priority = determine_category_and_priority(sender, subject, snippet, full_body)
+        category, priority = determine_category_and_priority(sender_email, subject, snippet, full_body)
 
         parsed.append({
             "subject": subject,

@@ -23,6 +23,7 @@ from openai import OpenAI
 import json
 from .outlook_read import fetch_message
 from outlook.utils.utils_notion import get_pending_replies, save_draft_reply
+from outlook.sync.sync_outlook_notion import _set_workflow_status_by_message_id, update_workflow_status_from_draft_status
 
 load_dotenv()
 
@@ -74,7 +75,7 @@ Please incorporate these changes into your response.
 """
 
     prompt = f"""
-You are Paula Sanguinetti, Director of The Design School at Arizona State University.
+You are Paola Sanguinetti, Director of The Design School at Arizona State University.
 Write a complete, warm, professional email reply in clean HTML format.
 
 Requirements:
@@ -83,7 +84,7 @@ Requirements:
 - Keep tone polite, positive, and concise.
 - End with a professional closing ("Best regards," or "Thanks,") followed by full signature:
   Best regards,<br>
-  <strong>Paula Sanguinetti</strong><br>
+  <strong>Paola Sanguinetti</strong><br>
   Director, The Design School<br>
   Arizona State University
 
@@ -117,8 +118,8 @@ Now write ONLY the full HTML email body:
         reply_html = response.choices[0].message.content.strip()
         
         # Safety check: ensure signature is present
-        if "Paula Sanguinetti" not in reply_html:
-            reply_html += "\n<br><br>Best regards,<br><strong>Paula Sanguinetti</strong><br>Director, The Design School<br>Arizona State University"
+        if "Paola Sanguinetti" not in reply_html:
+            reply_html += "\n<br><br>Best regards,<br><strong>Paola Sanguinetti</strong><br>Director, The Design School<br>Arizona State University"
         
         return reply_html
     except Exception as e:
@@ -127,7 +128,7 @@ Now write ONLY the full HTML email body:
         <p>Dear {sender_name.split()[0] if sender_name else "Colleague"},</p>
         <p>Thank you for your email. I will follow up on your request shortly.</p>
         <p>Best regards,<br>
-        <strong>Paula Sanguinetti</strong><br>
+        <strong>Paola Sanguinetti</strong><br>
         Director, The Design School<br>
         Arizona State University</p>
         """
@@ -156,8 +157,11 @@ def process_draft_generation():
         
         message_id = props["Message ID"]["rich_text"][0]["text"]["content"]
         instruction = props["Reply Instruction"]["rich_text"][0]["text"]["content"]
-        
+
         try:
+            # Set workflow status to "Generating Draft"
+            _set_workflow_status_by_message_id(message_id, "Generating Draft")
+
             # Fetch original message
             original = fetch_message(message_id)
             original_body = original["body"]["content"]
@@ -170,12 +174,16 @@ def process_draft_generation():
             
             # Save to Notion for review
             save_draft_reply(page_id, draft_html)
-            
+
+            # After saving, update workflow status based on current draft status
+            update_workflow_status_from_draft_status(message_id)
+
             subject = props["Subject"]["title"][0]["text"]["content"]
             print(f"✅ Draft created for: {subject[:50]}...")
             draft_count += 1
             
         except Exception as e:
+            _set_workflow_status_by_message_id(message_id, "Error")
             print(f"❌ Error processing {message_id}: {e}")
     
     print(f"\n✅ Generated {draft_count} draft(s)")

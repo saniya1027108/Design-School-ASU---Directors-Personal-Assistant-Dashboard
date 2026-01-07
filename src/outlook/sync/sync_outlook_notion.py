@@ -70,6 +70,35 @@ def _set_email_property_by_message_id(message_id: str, email_text: str):
         print(f"⚠️ Failed to update 'Email' property for Message ID {message_id}: {e}")
 
 
+def _set_workflow_status_by_message_id(message_id: str, status: str):
+    """Update the 'Workflow Status' property for a given Message ID."""
+    if not (NOTION_API_KEY and NOTION_DATABASE_ID and message_id and status):
+        return
+    try:
+        query_url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
+        payload = {
+            "filter": {"property": "Message ID", "rich_text": {"equals": message_id}},
+            "page_size": 1,
+        }
+        resp = requests.post(query_url, headers=_notion_headers(), json=payload, timeout=20)
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        if not results:
+            return
+        page_id = results[0]["id"]
+
+        patch_url = f"https://api.notion.com/v1/pages/{page_id}"
+        patch_payload = {
+            "properties": {
+                "Workflow Status": {"select": {"name": status}}
+            }
+        }
+        upd = requests.patch(patch_url, headers=_notion_headers(), json=patch_payload, timeout=20)
+        upd.raise_for_status()
+    except Exception as e:
+        print(f"⚠️ Failed to update 'Workflow status' for Message ID {message_id}: {e}")
+
+
 def html_to_text(html: str) -> str:
     """Convert simple HTML email body to readable plain text for Notion display."""
     if not html:
@@ -84,6 +113,69 @@ def html_to_text(html: str) -> str:
     txt = unescape(txt)
     txt = re.sub(r"\n{3,}", "\n\n", txt)
     return txt.strip()
+
+
+def get_draft_status_for_message(message_id: str):
+    """
+    Fetch the current Draft Status for a given message from Notion.
+    Returns the draft status string, or None if not found.
+    """
+    if not (NOTION_API_KEY and NOTION_DATABASE_ID and message_id):
+        return None
+    try:
+        query_url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
+        payload = {
+            "filter": {"property": "Message ID", "rich_text": {"equals": message_id}},
+            "page_size": 1,
+        }
+        resp = requests.post(query_url, headers=_notion_headers(), json=payload, timeout=20)
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        if not results:
+            return None
+        props = results[0].get("properties", {})
+        draft_status = props.get("Draft Status", {}).get("select", {}).get("name")
+        return draft_status
+    except Exception as e:
+        print(f"⚠️ Failed to fetch Draft Status for Message ID {message_id}: {e}")
+        return None
+
+
+def update_workflow_status_from_draft_status(message_id: str):
+    """
+    Update workflow status based on the current draft status.
+    Call this function whenever the draft status changes in your pipeline.
+    """
+    draft_status = get_draft_status_for_message(message_id)
+    status_map = {
+        "Generate Draft": "Generating Draft",
+        "Needs Revision": "Revising",
+        "Approved": "Sending",
+        "Sent": "Complete",
+        "Pending Review": "Idle",
+        "New": "Idle",
+    }
+    workflow_status = status_map.get(draft_status, "Idle")
+    _set_workflow_status_by_message_id(message_id, workflow_status)
+
+
+def is_email_already_synced(message_id: str):
+    """Check if an email with this Message ID already exists in Notion."""
+    if not (NOTION_API_KEY and NOTION_DATABASE_ID and message_id):
+        return False
+    try:
+        query_url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
+        payload = {
+            "filter": {"property": "Message ID", "rich_text": {"equals": message_id}},
+            "page_size": 1,
+        }
+        resp = requests.post(query_url, headers=_notion_headers(), json=payload, timeout=20)
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        return bool(results)
+    except Exception as e:
+        print(f"⚠️ Failed to check if email is already synced for Message ID {message_id}: {e}")
+        return False
 
 
 def sync_emails():
@@ -103,6 +195,12 @@ def sync_emails():
 
     for e in emails:
         try:
+            # Skip emails that are already synced
+            if is_email_already_synced(e["message_id"]):
+                continue
+
+            _set_workflow_status_by_message_id(e["message_id"], "Syncing")
+
             full_html = e["full_body"] or ""
             full_text = html_to_text(full_html)
 
@@ -110,22 +208,28 @@ def sync_emails():
                 "subject": e["subject"],
                 "sender": e["sender"],
                 "snippet": e["snippet"],
-                "full_body": full_html,         # keep for backward compatibility
-                "full_body_html": full_html,    # map to "Full Email (HTML)" (optional)
-                "full_body_text": full_text,    # map to "Full Email (Text)" (primary)
+                "full_body": full_html,
+                "full_body_html": full_html,
+                "full_body_text": full_text,
                 "thread_id": e["message_id"],
                 "priority": e["priority"],
                 "category": e["category"],
                 "received_at": e["received_at"]
             })
 
-            # NEW: ensure Notion column 'Email' is populated (plain text full email)
             _set_email_property_by_message_id(e["message_id"], full_text)
+
+            update_workflow_status_from_draft_status(e["message_id"])
 
             success_count += 1
         except Exception as error:
             error_count += 1
             print(f"⚠️ Failed to sync '{e['subject'][:50]}...' → {str(error)}")
+            _set_workflow_status_by_message_id(e["message_id"], "Error")
+
+    # Optionally, set all emails to "Idle" after processing is done
+    # for e in emails:
+    #     _set_workflow_status_by_message_id(e["message_id"], "Idle")
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ if str(project_root) not in sys.path:
 import requests
 from dotenv import load_dotenv
 from outlook.utils.outlook_auth import get_token
+from outlook.sync.sync_outlook_notion import _set_workflow_status_by_message_id, update_workflow_status_from_draft_status
 
 load_dotenv()
 
@@ -26,7 +27,10 @@ USER = os.getenv("OUTLOOK_USER")
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 
-def send_email(to, subject, body):
+def send_email(to, subject, body, message_id=None):
+    if message_id:
+        _set_workflow_status_by_message_id(message_id, "Sending")
+
     token = get_token()
 
     headers = {
@@ -49,3 +53,6 @@ def send_email(to, subject, body):
     resp.raise_for_status()
 
     print("Email sent ✔")
+    if message_id:
+        # After sending, update workflow status based on draft status
+        update_workflow_status_from_draft_status(message_id)
