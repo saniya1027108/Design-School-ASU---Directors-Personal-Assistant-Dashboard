@@ -5,6 +5,8 @@ Handles revision requests from Notion dashboard
 
 import sys
 from pathlib import Path
+import time
+import os
 
 # --- Fix sys.path using pathlib for cross-platform compatibility ---
 current_file = Path(__file__).resolve()
@@ -21,6 +23,8 @@ from .outlook_read import fetch_message
 from outlook.utils.utils_notion import get_revision_requests, save_draft_reply
 from .draft_replies import generate_draft_reply, lookup_sender_category
 from outlook.sync.sync_outlook_notion import _set_workflow_status_by_message_id, update_workflow_status_from_draft_status
+
+NOTION_WATCH_INTERVAL_SEC = int(os.getenv("NOTION_WATCH_INTERVAL_SEC", "10"))
 
 
 def process_revisions():
@@ -80,5 +84,11 @@ def process_revisions():
     print(f"\n✅ Processed {revision_count} revision(s)")
 
 
+def main_loop():
+    while True:
+        process_revisions()
+        time.sleep(NOTION_WATCH_INTERVAL_SEC)
+
+
 if __name__ == "__main__":
-    process_revisions()
+    main_loop()

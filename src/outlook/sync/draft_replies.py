@@ -6,6 +6,7 @@ Generates draft replies and saves them to Notion for review
 import sys
 from pathlib import Path
 import os
+import time
 
 # --- Fix sys.path using pathlib for cross-platform compatibility ---
 current_file = Path(__file__).resolve()
@@ -189,5 +190,12 @@ def process_draft_generation():
     print(f"\n✅ Generated {draft_count} draft(s)")
 
 
+NOTION_WATCH_INTERVAL_SEC = int(os.getenv("NOTION_WATCH_INTERVAL_SEC", "10"))
+
+def main_loop():
+    while True:
+        process_draft_generation()
+        time.sleep(NOTION_WATCH_INTERVAL_SEC)
+
 if __name__ == "__main__":
-    process_draft_generation()
+    main_loop()

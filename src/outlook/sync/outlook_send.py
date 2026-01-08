@@ -2,6 +2,7 @@
 import sys
 from pathlib import Path
 import os
+import time
 
 # --- Fix sys.path using pathlib for cross-platform compatibility ---
 current_file = Path(__file__).resolve()
@@ -25,6 +26,7 @@ load_dotenv()
 
 USER = os.getenv("OUTLOOK_USER")
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+NOTION_WATCH_INTERVAL_SEC = int(os.getenv("NOTION_WATCH_INTERVAL_SEC", "10"))
 
 
 def send_email(to, subject, body, message_id=None):
@@ -56,3 +58,14 @@ def send_email(to, subject, body, message_id=None):
     if message_id:
         # After sending, update workflow status based on draft status
         update_workflow_status_from_draft_status(message_id)
+
+
+def main_loop():
+    while True:
+        # Call your send_approved_replies function here if you have it
+        # send_approved_replies()
+        time.sleep(NOTION_WATCH_INTERVAL_SEC)
+
+
+if __name__ == "__main__":
+    main_loop()
