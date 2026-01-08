@@ -49,6 +49,16 @@ def lookup_sender_category(sender_email):
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
+def clean_html_reply(reply_html):
+    # Remove triple backticks and optional language tags (e.g., ```html)
+    lines = reply_html.strip().splitlines()
+    # Remove starting and ending lines if they are triple backticks or ```html
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
 def generate_draft_reply(instruction, original_body, sender_name, sender_category=None, revision_notes=None):
     """Generate a draft reply based on instruction and optional revision notes"""
     
@@ -118,6 +128,9 @@ Now write ONLY the full HTML email body:
         )
         reply_html = response.choices[0].message.content.strip()
         
+        # Clean up unwanted markdown formatting
+        reply_html = clean_html_reply(reply_html)
+        
         # Safety check: ensure signature is present
         if "Paola Sanguinetti" not in reply_html:
             reply_html += "\n<br><br>Best regards,<br><strong>Paola Sanguinetti</strong><br>Director, The Design School<br>Arizona State University"
@@ -125,14 +138,14 @@ Now write ONLY the full HTML email body:
         return reply_html
     except Exception as e:
         print(f"⚠️ OpenAI draft generation failed: {e}")
-        return f"""
+        return clean_html_reply(f"""
         <p>Dear {sender_name.split()[0] if sender_name else "Colleague"},</p>
         <p>Thank you for your email. I will follow up on your request shortly.</p>
         <p>Best regards,<br>
         <strong>Paola Sanguinetti</strong><br>
         Director, The Design School<br>
         Arizona State University</p>
-        """
+        """)
 
 
 def process_draft_generation():
