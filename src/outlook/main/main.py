@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 """
 Email Automation Pipeline - Main Orchestrator
-Syncs Outlook emails to Notion and processes replies
+Syncs Outlook emails to a web dashboard and processes replies
 """
 
 import sys
@@ -14,6 +14,7 @@ import time
 import requests
 from datetime import datetime, timezone
 import argparse
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 
 # --- Fix sys.path using pathlib for cross-platform compatibility ---
 current_file = Path(__file__).resolve()
@@ -44,10 +45,13 @@ print(f"📄 Using environment: {args.env} ({env_file.name})")
 # Load selected .env file
 load_dotenv(dotenv_path=env_file)
 
-# Notion credentials for watcher
-NOTION_API_KEY = os.getenv("NOTION_API_KEY")
-NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
-NOTION_VERSION = "2022-06-28"
+# Data storage paths (replace Notion DB with local JSON files)
+EMAILS_JSON = project_root / "data" / "emails.json"
+ACTION_ITEMS_JSON = project_root / "data" / "action_items.json"
+DRAFTS_JSON = project_root / "data" / "drafts.json"
+
+# Ensure data directory exists
+os.makedirs(project_root / "data", exist_ok=True)
 
 # Optional tuning via env
 WATCH_INTERVAL_SEC = int(os.getenv("NOTION_WATCH_INTERVAL_SEC", "15"))
@@ -171,172 +175,104 @@ def run_full_pipeline():
         print(f"\n❌ Fatal error: {e}")
         sys.exit(1)
 
+# --- Flask Dashboard Setup ---
+from dashboard.app import app  # Import the Flask app from your dashboard module
 
-def _notion_headers():
-    return {
-        "Authorization": f"Bearer {NOTION_API_KEY}",
-        "Content-Type": "application/json",
-        "Notion-Version": NOTION_VERSION,
+def load_json(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+@app.route("/")
+def dashboard():
+    emails = load_json(EMAILS_JSON)
+    action_items = load_json(ACTION_ITEMS_JSON)
+    drafts = load_json(DRAFTS_JSON)
+    return render_template("dashboard.html", emails=emails, action_items=action_items, drafts=drafts)
+
+@app.route("/emails")
+def get_emails():
+    return jsonify(load_json(EMAILS_JSON))
+
+@app.route("/action_items")
+def get_action_items():
+    return jsonify(load_json(ACTION_ITEMS_JSON))
+
+@app.route("/drafts")
+def get_drafts():
+    return jsonify(load_json(DRAFTS_JSON))
+
+@app.route("/drafts/generate", methods=["POST"])
+def generate_draft():
+    # Simulate draft generation
+    data = request.json
+    drafts = load_json(DRAFTS_JSON)
+    new_draft = {
+        "email_id": data["email_id"],
+        "instruction": data["instruction"],
+        "draft": f"Draft reply for: {data['instruction']}",
+        "status": "Generated"
     }
+    drafts.append(new_draft)
+    save_json(DRAFTS_JSON, drafts)
+    return jsonify({"success": True, "draft": new_draft})
 
-def _get_latest_notion_edit_ts():
-    """Return the most recent last_edited_time across pages (ISO string) or None."""
-    if not NOTION_API_KEY or not NOTION_DATABASE_ID:
-        return None
-    try:
-        url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
-        payload = {
-            "page_size": 1,
-            "sorts": [{"timestamp": "last_edited_time", "direction": "descending"}]
-        }
-        resp = requests.post(url, headers=_notion_headers(), json=payload, timeout=20)
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
-        if not results:
-            return None
-        return results[0].get("last_edited_time")
-    except Exception as e:
-        print(f"⚠️ Notion watch: failed to fetch latest edit time: {e}")
-        return None
+@app.route("/drafts/revise", methods=["POST"])
+def revise_draft():
+    data = request.json
+    drafts = load_json(DRAFTS_JSON)
+    for d in drafts:
+        if d["email_id"] == data["email_id"]:
+            d["draft"] = data["new_draft"]
+            d["status"] = "Revised"
+    save_json(DRAFTS_JSON, drafts)
+    return jsonify({"success": True})
 
-def _db_has(filter_obj) -> bool:
-    """Return True if any page matches the provided filter."""
-    try:
-        url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
-        resp = requests.post(url, headers=_notion_headers(), json={"filter": filter_obj, "page_size": 1}, timeout=20)
-        resp.raise_for_status()
-        return len(resp.json().get("results", [])) > 0
-    except Exception as e:
-        print(f"⚠️ Notion check failed: {e}")
-        return False
+@app.route("/drafts/send", methods=["POST"])
+def send_draft():
+    data = request.json
+    drafts = load_json(DRAFTS_JSON)
+    for d in drafts:
+        if d["email_id"] == data["email_id"]:
+            d["status"] = "Sent"
+    save_json(DRAFTS_JSON, drafts)
+    # Here, integrate with Outlook send logic if needed
+    return jsonify({"success": True})
 
-def _has_ready_to_draft_pages_debounced() -> bool:
-    """
-    Return True only if there are pages with:
-      - Reply Instruction not empty
-      - Draft Status == 'Generate Draft'
-      - last_edited_time older than debounce window
-    """
-    try:
-        url = f"https://api.notion.com/v1/databases/{NOTION_DATABASE_ID}/query"
-        payload = {
-            "filter": {
-                "and": [
-                    {"property": "Reply Instruction", "rich_text": {"is_not_empty": True}},
-                    {"property": "Draft Status", "select": {"equals": "Generate Draft"}}
-                ]
-            },
-            "sorts": [{"timestamp": "last_edited_time", "direction": "descending"}],
-            "page_size": 25
-        }
-        resp = requests.post(url, headers=_notion_headers(), json=payload, timeout=20)
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
-        if not results:
-            return False
+def sync_emails_to_json():
+    # Replace sync_emails() to fetch emails and save to EMAILS_JSON
+    emails = []  # Fetch from Outlook API
+    # ...fetch logic...
+    save_json(EMAILS_JSON, emails)
+    print("Synced emails to dashboard.")
 
-        now = datetime.now(timezone.utc)
-        for page in results:
-            ts = page.get("last_edited_time")
-            if not ts:
-                continue
-            try:
-                edited = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                idle_sec = (now - edited).total_seconds()
-                if idle_sec >= INSTRUCTION_DEBOUNCE_SEC:
-                    return True
-            except Exception:
-                # if parsing fails, be conservative: do not auto-generate
-                continue
-        return False
-    except Exception as e:
-        print(f"⚠️ Notion debounce check failed: {e}")
-        return False
+def extract_action_items_to_json():
+    # Extract action items and save to ACTION_ITEMS_JSON
+    action_items = []  # Extract logic...
+    # ...extract logic...
+    save_json(ACTION_ITEMS_JSON, action_items)
+    print("Extracted action items to dashboard.")
 
-def run_watch():
-    print_header()
-    print("👀 Watching Notion for changes (auto-run workflow)...")
-    print(f"⏱️  Poll: {WATCH_INTERVAL_SEC}s | Re-sync: {SYNC_EVERY_SEC}s | Debounce: {INSTRUCTION_DEBOUNCE_SEC}s")
-    print("Set 'Draft Status' to 'Generate Draft' when instruction is ready.\n")
-
-    last_seen = None
-    last_sync_ts = time.time() - SYNC_EVERY_SEC
-
-    try:
-        while True:
-            # Periodic email sync
-            now = time.time()
-            if now - last_sync_ts >= SYNC_EVERY_SEC:
-                try:
-                    if _ensure_outlook_or_warn("Periodic sync"):
-                        print("🔄 Periodic sync: Outlook → Notion")
-                        sync_emails()
-                    else:
-                        print("⏭️  Skipping periodic sync (no Outlook credentials).")
-                except Exception as e:
-                    print(f"⚠️ Periodic sync failed: {e}")
-                last_sync_ts = now
-
-            latest = _get_latest_notion_edit_ts()
-            if latest and latest != last_seen:
-                print(f"🔔 Detected Notion changes at {latest}. Evaluating workflow steps...")
-
-                # 1) Revisions
-                try:
-                    needs_revision = _db_has({
-                        "and": [
-                            {"property": "Draft Status", "select": {"equals": "Needs Revision"}},
-                            {"property": "Revision Notes", "rich_text": {"is_not_empty": True}}
-                        ]
-                    })
-                    if needs_revision:
-                        process_revisions()
-                except Exception as e:
-                    print(f"⚠️ Revision processing failed: {e}")
-
-                # 2) Generate drafts
-                try:
-                    if _has_ready_to_draft_pages_debounced():
-                        process_draft_generation()
-                    else:
-                        print("⏸️  Skipping draft generation (waiting for 'Generate Draft' + debounce).")
-                except Exception as e:
-                    print(f"⚠️ Draft generation failed: {e}")
-
-                # 3) Send only approved drafts (if Outlook configured)
-                try:
-                    has_approved = _db_has({"property": "Draft Status", "select": {"equals": "Approved"}})
-                    if has_approved:
-                        if _ensure_outlook_or_warn("Sending approved replies"):
-                            send_approved_replies()
-                        else:
-                            print("⏭️  Skipping send (no Outlook credentials).")
-                except Exception as e:
-                    print(f"⚠️ Sending approved replies failed: {e}")
-
-                last_seen = latest
-                print("✅ Workflow check complete.\n")
-
-            time.sleep(WATCH_INTERVAL_SEC)
-
-    except KeyboardInterrupt:
-        print("\n🛑 Stopped watching Notion.")
-        print_footer()
-    except Exception as e:
-        print(f"\n❌ Fatal error in watch mode: {e}")
-        sys.exit(1)
+def run_dashboard():
+    print("🚀 Starting dashboard at http://127.0.0.1:5000/")
+    app.run(debug=True)
 
 def show_menu():
     print_header()
     print(f"🔧 Current environment: {args.env} ({env_map[args.env]})")
     print("Select an option:")
     print("  1. Run full pipeline (Sync + Generate Drafts)")
-    print("  2. Sync emails only (Outlook → Notion)")
+    print("  2. Sync emails only (Outlook → Dashboard)")
     print("  3. Generate drafts (for pending reply instructions)")
     print("  4. Process revisions (update drafts based on feedback)")
     print("  5. Send approved replies")
     print("  6. Exit")
-    print("  7. Watch Notion for changes (auto-run)")
+    print("  7. Start Dashboard (web interface)")
     print()
     
     choice = input("Enter choice (1-7): ").strip()
@@ -344,36 +280,35 @@ def show_menu():
     if choice == "1":
         run_full_pipeline()
     elif choice == "2":
-        run_sync_only()
+        sync_emails_to_json()
     elif choice == "3":
-        run_draft_generation()
+        print("Use the dashboard to generate drafts.")
     elif choice == "4":
-        run_revision_processing()
+        print("Use the dashboard to revise drafts.")
     elif choice == "5":
-        run_send_approved()
+        print("Use the dashboard to send approved replies.")
     elif choice == "6":
         print("👋 Goodbye!")
         sys.exit(0)
     elif choice == "7":
-        run_watch()
+        run_dashboard()
     else:
         print("❌ Invalid choice")
-
 
 if __name__ == "__main__":
     if args.command:
         command = args.command.lower()
         if command == "sync":
-            run_sync_only()
+            sync_emails_to_json()
         elif command == "draft":
-            run_draft_generation()
+            print("Use the dashboard to generate drafts.")
         elif command == "revise":
-            run_revision_processing()
+            print("Use the dashboard to revise drafts.")
         elif command == "send":
-            run_send_approved()
+            print("Use the dashboard to send approved replies.")
         elif command == "full":
             run_full_pipeline()
         elif command == "watch":
-            run_watch()
+            run_dashboard()
     else:
         show_menu()

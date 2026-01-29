@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Emails - Full View</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root{--max-w:1600px;--base:17px}
+    html,body{font-size:var(--base);background:#f4f6fb}
+    .container-fluid{max-width:var(--max-w)}
+    :root { --table-min-width: 2600px; }
+    table.table { width:100%; min-width: var(--table-min-width); border-collapse: separate; border-spacing:0; }
+    thead th{background:#fff;position:sticky;top:0;padding:14px 16px;font-weight:700;border-bottom:1px solid #e9ecef}
+    tbody td{padding:14px 16px;vertical-align:middle;font-size:0.98rem}
+    .reply-area textarea{width:100%;min-height:130px;padding:.6rem;font-size:1rem;resize:vertical}
+    .rev-area textarea{width:100%;min-height:70px;padding:.5rem;font-size:.95rem;resize:vertical}
+    .action-btn{margin-right:8px;margin-bottom:6px}
+    .status-pill{font-size:1rem;padding:.35rem .6rem;border-radius:.5rem}
+    col.sender{width:160px}
+    col.subject{width:260px}
+    col.email-col{width:220px}
+    col.category{width:120px}
+    col.priority{width:80px}
+    col.summary{width:360px}
+    col.instruction{width:420px}
+    col.draft{width:520px}
+    col.revision{width:260px}
+    col.status{width:120px}
+    col.workflow{width:140px}
+    col.actions{width:160px}
+    .table-responsive{overflow-x:auto}
+    .actions-cell .btn{display:block;width:100%;margin-bottom:6px}
+    .small-muted{font-size:.9rem;color:#6c757d}
+  </style>
+</head>
+<body>
+<div class="container-fluid py-4">
+  <div class="d-flex align-items-center mb-3">
+    <h3 class="me-auto">📧 Email Inbox</h3>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Back</a>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body p-3">
+      <div class="table-responsive">
+        <table class="table table-hover table-fixed align-middle">
+          <colgroup>
+            <col class="sender"><col class="subject"><col class="email-col"><col class="category"><col class="priority">
+            <col class="summary"><col class="instruction"><col class="draft"><col class="revision"><col class="status"><col class="workflow"><col class="actions">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Sender</th>
+              <th>Subject</th>
+              <th>Email</th>
+              <th>Category</th>
+              <th>Priority</th>
+              <th>Summary</th>
+              <th>Reply Instruction</th>
+              <th>Draft Reply</th>
+              <th>Revision Notes</th>
+              <th>Draft Status</th>
+              <th>Workflow Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for e in emails %}
+            {% set d = drafts_map.get(e.id) %}
+            <tr data-id="{{ e.id }}">
+              <td style="word-break:break-word;">{{ e.from or e.email }}</td>
+              <td style="word-break:break-word;">{{ e.subject }}</td>
+              <td style="word-break:break-word;">{{ e.email or (e.from or '') }}</td>
+              <td>{{ e.category or '' }}</td>
+              <td>{{ e.priority or '' }}</td>
+              <td style="max-width:420px;white-space:normal;">{{ e.summary or '' }}</td>
+              <td class="reply-area"><textarea class="form-control instruction-input" data-id="{{ e.id }}">{{ e.reply_instruction or '' }}</textarea>
+                <div class="mt-2 d-flex gap-2">
+                  <button class="btn btn-sm btn-outline-primary save-instruction" data-id="{{ e.id }}">Save</button>
+                  <button class="btn btn-sm btn-outline-secondary clear-instruction" data-id="{{ e.id }}">Clear</button>
+                </div>
+              </td>
+              <td class="draft-cell" style="max-width:560px;white-space:normal;">{% if d and d.draft %}{{ d.draft|safe }}{% else %}<span class="small-muted">No draft</span>{% endif %}</td>
+              <td class="rev-area"><textarea class="form-control revision-input" data-id="{{ e.id }}" placeholder="Add revision notes...">{{ d.revision_notes if d and d.revision_notes else '' }}</textarea>
+                <div class="mt-2"><button class="btn btn-sm btn-outline-warning revise-draft" data-id="{{ e.id }}">Revise</button></div>
+              </td>
+              <td>
+                <select class="form-select form-select-sm draft-status-select" data-id="{{ e.id }}">
+                  {% set ds = (e.draft_status or (d.status if d and d.status else 'new')).lower() %}
+                  <option value="new" {{ 'selected' if ds=='new' else '' }}>New</option>
+                  <option value="generate draft" {{ 'selected' if ds=='generate draft' else '' }}>Generate Draft</option>
+                  <option value="pending review" {{ 'selected' if ds=='pending review' else '' }}>Pending Review</option>
+                  <option value="approved" {{ 'selected' if ds=='approved' else '' }}>Approved</option>
+                  <option value="needs revision" {{ 'selected' if ds=='needs revision' else '' }}>Needs Revision</option>
+                  <option value="send" {{ 'selected' if ds=='send' else '' }}>Send</option>
+                </select>
+              </td>
+              <td class="workflow-cell small-muted">{{ e.workflow_status or e.workflow or (d.status if d and d.status else 'idle') }}</td>
+              <td class="actions-cell">
+                <button class="btn btn-sm btn-primary generate-draft" data-id="{{ e.id }}">Generate</button>
+                <button class="btn btn-sm btn-success send-draft" data-id="{{ e.id }}">Send</button>
+              </td>
+            </tr>
+            {% endfor %}
+            {% if emails|length == 0 %}
+              <tr><td colspan="12" class="text-center text-muted">No emails</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function apiPost(url, body){ return fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)}).then(r=>r.json()); }
+function rowFor(id){ return document.querySelector('tr[data-id="'+id+'"]'); }
+function setDraftCell(id, html){ const r=rowFor(id); if(!r) return; const cell=r.querySelector('.draft-cell'); if(cell){ cell.innerHTML = html || '<span class="small-muted">No draft</span>'; } }
+function setWorkflow(id, text){ const r=rowFor(id); if(!r) return; const cell=r.querySelector('.workflow-cell'); if(cell) cell.textContent = text; }
+function setDraftStatusSelect(id, val){ const sel = document.querySelector('.draft-status-select[data-id="'+id+'"]'); if(sel) sel.value = val; }
+
+document.querySelectorAll('.save-instruction').forEach(btn=>{ btn.addEventListener('click', async ()=>{ const id=btn.dataset.id; const txt=document.querySelector('.instruction-input[data-id="'+id+'"]').value||''; await apiPost('/emails/update',{id:id,reply_instruction:txt}); setWorkflow(id,'idle'); }); });
+document.querySelectorAll('.clear-instruction').forEach(btn=>{ btn.addEventListener('click', ()=>{ const id=btn.dataset.id; document.querySelector('.instruction-input[data-id="'+id+'"]').value=''; apiPost('/emails/update',{id:id,reply_instruction:''}); }); });
+
+document.querySelectorAll('.draft-status-select').forEach(sel=>sel.addEventListener('change', async ()=>{ const id=sel.dataset.id; await apiPost('/emails/update',{id:id,draft_status:sel.value}); setWorkflow(id,sel.value); }));
+
+document.querySelectorAll('.generate-draft').forEach(btn=>btn.addEventListener('click', async ()=>{ const id=btn.dataset.id; const instr=document.querySelector('.instruction-input[data-id="'+id+'"]').value||''; if(!instr){ alert('Please add a reply instruction first.'); return; } try{ setWorkflow(id,'Generating Draft'); const res=await apiPost('/drafts/generate',{email_id:id,instruction:instr}); if(res.success && res.draft && res.draft.draft){ setDraftCell(id,res.draft.draft); setDraftStatusSelect(id,'Generate Draft'); setWorkflow(id,'Generated'); } else { setWorkflow(id,'Error'); alert('Failed to generate draft'); } }catch(e){ setWorkflow(id,'Error'); alert('Error'); } }));
+
+document.querySelectorAll('.revise-draft').forEach(btn=>btn.addEventListener('click', async ()=>{ const id=btn.dataset.id; const rev=document.querySelector('.revision-input[data-id="'+id+'"]').value||''; if(!rev){ alert('Please enter revision notes.'); return; } try{ setWorkflow(id,'Revising'); const instr=(document.querySelector('.instruction-input[data-id="'+id+'"]').value||'') + "\n\nPlease revise using these notes:\n" + rev; const res=await apiPost('/drafts/generate',{email_id:id,instruction:instr}); if(res.success && res.draft && res.draft.draft){ setDraftCell(id,res.draft.draft); await apiPost('/drafts/revise',{email_id:id,revision_notes:rev}); setWorkflow(id,'Revised'); setDraftStatusSelect(id,'Needs Revision'); } else { setWorkflow(id,'Error'); alert('Failed to revise draft'); } }catch(e){ setWorkflow(id,'Error'); alert('Error'); } }));
+
+document.querySelectorAll('.send-draft').forEach(btn=>btn.addEventListener('click', async ()=>{ const id=btn.dataset.id; if(!confirm('Send this draft?')) return; try{ setWorkflow(id,'Sending'); const res=await apiPost('/drafts/send',{email_id:id}); if(res.success){ setWorkflow(id,'Sent'); setDraftStatusSelect(id,'Sent'); alert('Sent'); } else { setWorkflow(id,'Error'); alert('Failed to send'); } }catch(e){ setWorkflow(id,'Error'); alert('Error'); } }));
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

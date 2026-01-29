@@ -17,6 +17,7 @@ import requests
 from glob import glob
 from typing import List, Dict, Optional
 from datetime import datetime
+from pathlib import Path
 
 from docx import Document
 from dotenv import load_dotenv
@@ -373,7 +374,7 @@ def upsert_action_item(database_id: str, ai_item: Dict, source_doc: str) -> str:
 # Orchestration
 # =========================
 
-def extract_action_items_from_docx(doc_path: str) -> List[Dict]:
+def extract_action_items_from_single_docx(doc_path: str) -> List[Dict]:
     paragraphs = parse_docx(doc_path)
     joined = join_paragraphs(paragraphs)
     if not joined.strip():
@@ -407,7 +408,7 @@ def process_agenda_docs() -> None:
         print(f"\nProcessing: {filename}")
 
         try:
-            items = extract_action_items_from_docx(doc_path)
+            items = extract_action_items_from_single_docx(doc_path)
         except Exception as e:
             print(f"  ❌ Extraction failed for {filename}: {e}")
             all_results[filename] = []
@@ -439,6 +440,43 @@ def process_agenda_docs() -> None:
     print(f"\nSaved extracted action items to: {output_path}")
     print(f"Notion sync summary: {created_count} created, {updated_count} updated.")
 
+def flatten_action_items_json(json_path):
+    """If action_items.json is a dict, flatten to a list."""
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        flat = []
+        for v in data.values():
+            if isinstance(v, list):
+                flat.extend(v)
+        return flat
+    return data
+
+def extract_action_items_from_agendas(output_json_path=None):
+    """
+    Extract action items from all agenda .docx files and write to output_json_path as a flat list.
+    If output_json_path is None, defaults to dashboard's data file.
+    """
+    # Use dashboard's data file if not specified
+    if output_json_path is None:
+        output_json_path = (
+            Path(__file__).parent.parent / "data" / "action_items.json"
+        )
+    else:
+        output_json_path = Path(output_json_path)
+
+    AGENDA_FOLDER = r"C:\Users\smulla1\Desktop\Personal Assistant\Email_Notion_Sync\Design-School-ASU---Directors-Personal-Assistant-Dashboard\src\agendas\agenda_documents"
+    docx_files = glob(os.path.join(AGENDA_FOLDER, "*.docx"))
+    all_items = []
+    for doc_path in docx_files:
+        items = extract_action_items_from_single_docx(doc_path)
+        all_items.extend(items)
+    output_json_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_json_path, "w", encoding="utf-8") as f:
+        json.dump(all_items, f, indent=2, ensure_ascii=False)
+    print(f"Extracted {len(all_items)} action items to {output_json_path}")
+
 
 if __name__ == "__main__":
-    process_agenda_docs()
+    # For CLI usage, also write to dashboard's data file for consistency
+    extract_action_items_from_agendas()

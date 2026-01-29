@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 import os
 import time
+import re
 
 # --- Fix sys.path using pathlib for cross-platform compatibility ---
 current_file = Path(__file__).resolve()
@@ -29,6 +30,11 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 NOTION_WATCH_INTERVAL_SEC = int(os.getenv("NOTION_WATCH_INTERVAL_SEC", "10"))
 
 
+def strip_html_tags(html):
+    # Remove HTML tags for plain text email
+    return re.sub(r'<[^>]+>', '', html)
+
+
 def send_email(to, subject, body, message_id=None):
     if message_id:
         _set_workflow_status_by_message_id(message_id, "Sending")
@@ -40,10 +46,13 @@ def send_email(to, subject, body, message_id=None):
         "Content-Type": "application/json"
     }
 
+    # Strip HTML tags from body before sending
+    plain_body = strip_html_tags(body)
+
     email_payload = {
         "message": {
             "subject": subject,
-            "body": {"contentType": "Text", "content": body},
+            "body": {"contentType": "Text", "content": plain_body},
             "toRecipients": [{"emailAddress": {"address": to}}],
         },
         "saveToSentItems": True
