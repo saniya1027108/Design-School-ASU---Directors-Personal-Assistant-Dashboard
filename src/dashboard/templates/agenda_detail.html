@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}{{ meeting.title }} - Agendas{% endblock %}
+{% block extra_css %}
+.notes-pane { min-height: 320px; }
+.notes-pane textarea { font-size: 1.05rem; }
+.action-item-row { border-left: 3px solid var(--accent); padding-left: 0.75rem; margin-bottom: 0.5rem; font-size: 1.05rem; }
+.action-item-row strong { font-size: 1.05rem; }
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0">
+  <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+    <a href="{{ url_for('agendas_list') }}" class="btn btn-outline-secondary btn-sm">← Agendas</a>
+    <h2 class="mb-0 fw-bold">{{ meeting.title or 'Meeting' }}</h2>
+    <span class="text-muted">{{ meeting.date or '—' }}{% if meeting.attendees %} · {{ meeting.attendees }}{% endif %}</span>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-6">
+      <div class="card notes-pane">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span class="fw-semibold">Notes</span>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="save-notes-btn">Save</button>
+        </div>
+        <div class="card-body">
+          <textarea id="meeting-notes" class="form-control font-monospace" rows="14" placeholder="Paste or type meeting agenda and notes here...">{{ meeting.notes or '' }}</textarea>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card notes-pane">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <span class="fw-semibold">Action items</span>
+          <div>
+            <button type="button" class="btn btn-sm btn-success me-1" id="extract-action-items-btn">Extract from notes</button>
+            <a href="{{ url_for('action_items_full') }}" class="btn btn-sm btn-outline-secondary">View all</a>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="action-items-list">
+            {% for item in (meeting.action_items or []) %}
+            <div class="action-item-row d-flex justify-content-between align-items-start bg-light rounded px-2 py-2" data-index="{{ loop.index0 }}">
+              <div>
+                <strong>{{ item.text }}</strong>
+                {% if item.due_date %}<div class="small text-muted">Due: {{ item.due_date }}</div>{% endif %}
+                {% if item.owner %}<div class="small">Assignee: {{ item.owner }}</div>{% endif %}
+              </div>
+              <span class="badge bg-{{ 'success' if item.status == 'done' else 'primary' }}">{{ item.status }}</span>
+            </div>
+            {% endfor %}
+            {% if not meeting.action_items or meeting.action_items|length == 0 %}
+            <p class="text-muted small mb-0" id="no-items-msg">No action items. Type notes on the left and click "Extract from notes" to pull out to-dos.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var meetingId = '{{ meeting.id }}';
+
+  document.getElementById('save-notes-btn').onclick = function() {
+    var notes = document.getElementById('meeting-notes').value;
+    fetch('/api/meetings/' + meetingId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes: notes })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (j.success) { alert('Notes saved.'); }
+      else alert('Failed to save');
+    })
+    .catch(function() { alert('Error'); });
+  };
+
+  document.getElementById('extract-action-items-btn').onclick = function() {
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Extracting...';
+    fetch('/api/meetings/' + meetingId + '/extract_action_items', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      btn.disabled = false;
+      btn.textContent = 'Extract from notes';
+      if (j.success) location.reload();
+      else alert(j.error || 'Extraction failed');
+    })
+    .catch(function() {
+      btn.disabled = false;
+      btn.textContent = 'Extract from notes';
+      alert('Error');
+    });
+  };
+})();
+</script>
+{% endblock %}

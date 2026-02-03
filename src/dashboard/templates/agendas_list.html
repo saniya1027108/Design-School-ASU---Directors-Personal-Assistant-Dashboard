@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Agendas - Personal Assistant{% endblock %}
+{% block extra_css %}
+.agenda-card .card-title { font-size: 1.2rem; }
+.agenda-card .card-text { font-size: 1rem; }
+.agenda-section-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-neutral); }
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0">
+  <h2 class="mb-4 fw-bold">Agendas</h2>
+
+  <!-- Staff agendas (1:1) -->
+  <section class="mb-5">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+      <h3 class="agenda-section-title mb-0">Staff agendas (1:1)</h3>
+      <button type="button" class="btn btn-primary btn-add-meeting" data-agenda-type="staff">+ New meeting</button>
+    </div>
+    <div class="row g-3">
+      {% for m in staff_meetings %}
+      <div class="col-12 col-md-6 col-lg-4">
+        <div class="card h-100 agenda-card">
+          <div class="card-body">
+            <h5 class="card-title">{{ m.title or 'Untitled' }}</h5>
+            <p class="text-muted mb-1" style="font-size:0.95rem;">{{ m.date or '—' }}{% if m.attendees %} · {{ m.attendees }}{% endif %}</p>
+            <p class="card-text text-truncate" style="max-height: 3em;">{{ m.notes or 'No notes yet' }}</p>
+            <div class="d-flex justify-content-between align-items-center mt-2">
+              <span class="badge bg-secondary">{{ (m.action_items or [])|length }} action items</span>
+              <a href="{{ url_for('agenda_detail', meeting_id=m.id) }}" class="btn btn-sm btn-outline-primary">Notes & actions</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+      {% if not staff_meetings %}
+      <div class="col-12">
+        <div class="card agenda-empty">
+          <div class="card-body text-center py-4">
+            <p class="text-muted mb-2">No staff meetings yet.</p>
+            <button type="button" class="btn btn-outline-primary btn-add-meeting" data-agenda-type="staff">+ Add staff meeting</button>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Project agendas -->
+  <section>
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+      <h3 class="agenda-section-title mb-0">Project agendas</h3>
+      <button type="button" class="btn btn-primary btn-add-meeting" data-agenda-type="project">+ New meeting</button>
+    </div>
+    <div class="row g-3">
+      {% for m in project_meetings %}
+      <div class="col-12 col-md-6 col-lg-4">
+        <div class="card h-100 agenda-card">
+          <div class="card-body">
+            <h5 class="card-title">{{ m.title or 'Untitled' }}</h5>
+            <p class="text-muted mb-1" style="font-size:0.95rem;">{{ m.date or '—' }}{% if m.attendees %} · {{ m.attendees }}{% endif %}</p>
+            <p class="card-text text-truncate" style="max-height: 3em;">{{ m.notes or 'No notes yet' }}</p>
+            <div class="d-flex justify-content-between align-items-center mt-2">
+              <span class="badge bg-secondary">{{ (m.action_items or [])|length }} action items</span>
+              <a href="{{ url_for('agenda_detail', meeting_id=m.id) }}" class="btn btn-sm btn-outline-primary">Notes & actions</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+      {% if not project_meetings %}
+      <div class="col-12">
+        <div class="card agenda-empty">
+          <div class="card-body text-center py-4">
+            <p class="text-muted mb-2">No project meetings yet.</p>
+            <button type="button" class="btn btn-outline-primary btn-add-meeting" data-agenda-type="project">+ Add project meeting</button>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<div class="modal fade" id="newMeetingModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">New meeting</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="new-meeting-agenda-type" value="staff">
+        <div class="mb-3">
+          <label class="form-label">Title</label>
+          <input type="text" id="new-meeting-title" class="form-control" placeholder="e.g. 1:1 with Mireille / 2026 DP">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Date</label>
+          <input type="date" id="new-meeting-date" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Attendees</label>
+          <input type="text" id="new-meeting-attendees" class="form-control" placeholder="Names">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="create-meeting-btn">Create</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var d = new Date();
+  document.getElementById('new-meeting-date').value = d.toISOString().slice(0, 10);
+
+  document.querySelectorAll('.btn-add-meeting').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var type = this.getAttribute('data-agenda-type') || 'staff';
+      document.getElementById('new-meeting-agenda-type').value = type;
+      new bootstrap.Modal(document.getElementById('newMeetingModal')).show();
+    });
+  });
+
+  document.getElementById('create-meeting-btn').onclick = function() {
+    var title = document.getElementById('new-meeting-title').value.trim() || 'Untitled meeting';
+    var date = document.getElementById('new-meeting-date').value;
+    var attendees = document.getElementById('new-meeting-attendees').value.trim();
+    var agendaType = document.getElementById('new-meeting-agenda-type').value || 'staff';
+    fetch('/api/meetings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title, date: date, attendees: attendees, agenda_type: agendaType, notes: '', action_items: [] })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (j.success && j.meeting) window.location.href = '/agendas/' + j.meeting.id;
+      else alert('Failed to create meeting');
+    })
+    .catch(function() { alert('Error'); });
+  };
+})();
+</script>
+{% endblock %}

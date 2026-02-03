@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Login - Personal Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --neutral-900: #1c1917;
+      --neutral-800: #292524;
+      --neutral-600: #57534e;
+      --neutral-500: #78716c;
+      --neutral-200: #e7e5e4;
+      --neutral-100: #f5f5f4;
+      --neutral-50: #fafaf9;
+    }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: linear-gradient(160deg, #292524 0%, #1c1917 50%, #292524 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .login-card { max-width: 420px; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.35); overflow: hidden; }
+    .login-header {
+      background: var(--neutral-800);
+      color: #e7e5e4;
+      padding: 1.75rem;
+      text-align: center;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .login-header h1 { font-size: 1.75rem; margin: 0; font-weight: 600; }
+    .login-header p { margin: 0.35rem 0 0; font-size: 0.95rem; opacity: 0.85; }
+    .login-body {
+      padding: 2rem;
+      background: var(--neutral-50);
+    }
+    .login-body .form-label { font-size: 1.05rem; color: var(--neutral-800); }
+    .login-body .form-control {
+      font-size: 1.05rem;
+      border-color: var(--neutral-200);
+      background: #fff;
+    }
+    .login-body .form-control:focus {
+      border-color: var(--neutral-600);
+      box-shadow: 0 0 0 3px rgba(87,83,78,0.12);
+    }
+    .btn-login {
+      background: var(--neutral-600);
+      border: none;
+      padding: 0.65rem 1.5rem;
+      font-weight: 600;
+      font-size: 1.05rem;
+      color: #fff;
+    }
+    .btn-login:hover { background: var(--neutral-800); color: #fff; }
+    .alert { border-radius: 8px; }
+    .login-body .text-muted { color: var(--neutral-500) !important; }
+  </style>
+</head>
+<body>
+  <div class="login-card w-100">
+    <div class="login-header">
+      <h1>Personal Assistant</h1>
+      <p class="mb-0">Sign in to continue</p>
+    </div>
+    <div class="login-body">
+      {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+      <form method="post" action="{{ url_for('login') }}">
+        <div class="mb-3">
+          <label class="form-label">Username</label>
+          <input type="text" name="username" class="form-control" required autofocus placeholder="Your name or username">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Password</label>
+          <input type="password" name="password" class="form-control" required placeholder="Password">
+        </div>
+        <button type="submit" class="btn btn-login w-100">Login</button>
+      </form>
+      <p class="text-muted small mt-3 mb-0">Default: any username + password to get started.</p>
+    </div>
+  </div>
+</body>
+</html>

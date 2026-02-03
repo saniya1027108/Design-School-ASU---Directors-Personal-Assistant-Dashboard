@@ -1,81 +1,396 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Paola's Dashboard</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    :root{--page-max:1400px;--base:16px}
-    html,body{font-size:var(--base);background:#fafcff}
-    .container-fluid{max-width:var(--page-max)}
-    .header{font-size:2.2rem;font-weight:700;text-align:center;margin-bottom:1rem}
-    .kanban {display:flex;gap:1rem;margin-bottom:1rem}
-    .col {background:#f8f9fa;padding:12px;border-radius:8px;flex:1;min-width:260px}
-    .action-row{display:flex;gap:1rem;justify-content:center;margin-top:1rem}
-    .action-box{min-width:300px;max-width:480px;background:#eef2f7;padding:22px;border-radius:12px;text-align:center;cursor:pointer;font-weight:600}
-    .user-form{max-width:480px;margin:1.5rem auto}
-  </style>
-</head>
-<body>
-<div class="container-fluid py-4">
-  <div class="header">Paola's Dashboard</div>
+{% extends "base.html" %}
+{% block title %}Dashboard - Personal Assistant{% endblock %}
+{% block extra_css %}
+.calendar-wrap { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; box-shadow: var(--shadow-sm); overflow: hidden; }
+.calendar-header { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; background: var(--accent-light); border-bottom: 1px solid var(--border-neutral); }
+.calendar-header h3 { margin: 0; font-size: 1.2rem; font-weight: 600; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); width: 100%; }
+.calendar-weekday { padding: 0.4rem; text-align: center; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-neutral); background: var(--accent-light); }
+.calendar-day { min-height: 88px; padding: 0.35rem; border: 1px solid var(--border-neutral); background: var(--card-bg); font-size: 0.9rem; }
+.calendar-day.other-month { background: #fafafa; color: var(--text-muted); }
+.calendar-day.today { background: #f0fdf4; border-color: #15803d; }
+.calendar-day-num { font-weight: 600; margin-bottom: 0.25rem; }
+.calendar-day-events { list-style: none; padding: 0; margin: 0; }
+.calendar-day-events li { font-size: 0.75rem; padding: 0.15rem 0.25rem; margin-bottom: 0.2rem; background: var(--accent-light); border-radius: 4px; border-left: 3px solid var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-day-events li.all-day { border-left-color: #15803d; }
+.calendar-day-events li { cursor: pointer; }
+.calendar-nav-btn { padding: 0.35rem 0.75rem; font-size: 0.95rem; }
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0">
+  <h2 class="mb-4 fw-bold">Dashboard</h2>
 
-  <div id="user-pane" class="user-form">
-    <form id="user-form">
-      <div class="mb-2"><label class="form-label">Your Name</label><input id="user-name" class="form-control" required></div>
-      <div class="mb-2"><label class="form-label">Your Email</label><input id="user-email" type="email" class="form-control" required></div>
-      <button class="btn btn-primary w-100">Continue</button>
-    </form>
+  <!-- Google Calendar - monthly view -->
+  <section class="calendar-wrap mb-4">
+    <div class="calendar-header">
+      <h3>📅 Calendar</h3>
+      <div class="d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary calendar-nav-btn" id="cal-prev" aria-label="Previous month">←</button>
+        <span id="cal-month-year" class="fw-semibold" style="min-width: 140px; text-align: center;"></span>
+        <button type="button" class="btn btn-sm btn-outline-secondary calendar-nav-btn" id="cal-next" aria-label="Next month">→</button>
+        {% if calendar_connected %}
+        <button type="button" class="btn btn-sm btn-primary ms-2" id="cal-add-event-btn">+ Add event</button>
+        {% endif %}
+        {% if calendar_configured and not calendar_connected %}
+        <a href="{{ url_for('calendar_connect') }}" class="btn btn-sm btn-primary ms-2">Connect Google Calendar</a>
+        {% endif %}
+      </div>
+    </div>
+    <div id="calendar-placeholder">
+      {% if calendar_connected %}
+      <div id="calendar-grid-holder"></div>
+      {% elif calendar_configured %}
+      <div class="p-4 text-center text-muted">
+        <p class="mb-2">Connect your Google Calendar to see events here.</p>
+        <a href="{{ url_for('calendar_connect') }}" class="btn btn-primary">Connect Google Calendar</a>
+      </div>
+      {% else %}
+      <div class="p-4 text-center text-muted">
+        <p class="mb-0">Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env and set redirect URI to <code>{{ request.url_root }}calendar/oauth2callback</code> to enable Google Calendar.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Add event modal -->
+  <div class="modal fade" id="cal-add-event-modal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Add event</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Title <span class="text-danger">*</span></label>
+            <input type="text" id="cal-event-title" class="form-control" placeholder="Event title" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Date</label>
+            <input type="date" id="cal-event-date" class="form-control">
+          </div>
+          <div class="mb-3 form-check">
+            <input type="checkbox" class="form-check-input" id="cal-event-all-day" checked>
+            <label class="form-check-label" for="cal-event-all-day">All day</label>
+          </div>
+          <div class="mb-3 row g-2" id="cal-event-time-row" style="display: none;">
+            <div class="col-6">
+              <label class="form-label">Start time</label>
+              <input type="time" id="cal-event-start-time" class="form-control" value="09:00">
+            </div>
+            <div class="col-6">
+              <label class="form-label">End time</label>
+              <input type="time" id="cal-event-end-time" class="form-control" value="10:00">
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Description</label>
+            <textarea id="cal-event-description" class="form-control" rows="3" placeholder="Optional"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="cal-event-submit">Add event</button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div id="main-dashboard" style="display:none;">
-    <div class="kanban">
-      <div class="col">
-        <h6>To Do</h6>
-        {% for item in action_items if item.status == 'todo' %}
-          <div style="padding:8px;background:#fff;border-radius:6px;margin-bottom:8px">
-            {{ item.text }}{% if item.due_date %}<div class="text-muted small">Due: {{ item.due_date }}</div>{% endif %}
-          </div>
-        {% endfor %}
-      </div>
-      <div class="col">
-        <h6>Done</h6>
-        {% for item in action_items if item.status == 'done' %}
-          <div style="padding:8px;background:#fff;border-radius:6px;margin-bottom:8px">
-            {{ item.text }}{% if item.due_date %}<div class="text-muted small">Due: {{ item.due_date }}</div>{% endif %}
-          </div>
-        {% endfor %}
+  <!-- View event modal -->
+  <div class="modal fade" id="cal-view-event-modal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="cal-view-event-title">Event</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-2"><strong>When</strong></p>
+          <p id="cal-view-event-when" class="text-muted mb-3"></p>
+          <p class="mb-2"><strong>Description</strong></p>
+          <p id="cal-view-event-description" class="text-muted mb-0" style="white-space: pre-wrap; max-height: 120px; overflow-y: auto;"></p>
+          <a id="cal-view-event-link" href="#" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm mt-3">Open in Google Calendar</a>
+        </div>
       </div>
     </div>
+  </div>
 
-    <div class="action-row">
-      <div class="action-box" id="reply-emails-box">📧 Reply Emails</div>
-      <div class="action-box" id="view-action-items-box">✅ View Action Items</div>
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <h6 class="text-muted text-uppercase mb-2" style="font-size:1rem;">Emails</h6>
+          <h3 class="mb-0">{{ emails|length }}</h3>
+          <a href="{{ url_for('emails_full') }}" class="btn btn-sm btn-outline-primary mt-2">View inbox</a>
+        </div>
+      </div>
     </div>
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <h6 class="text-muted text-uppercase mb-2" style="font-size:1rem;">Action items</h6>
+          <h3 class="mb-0">{{ action_items|length }}</h3>
+          <a href="{{ url_for('action_items_full') }}" class="btn btn-sm btn-outline-primary mt-2">View all</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <h6 class="text-muted text-uppercase mb-2" style="font-size:1rem;">Quick actions</h6>
+          <div class="d-flex flex-wrap gap-2 mt-2">
+            <a href="{{ url_for('emails_full') }}" class="btn btn-primary">📧 Emails</a>
+            <a href="{{ url_for('agendas_list') }}" class="btn btn-outline-secondary">📋 Agendas</a>
+            <a href="{{ url_for('kanban_board') }}" class="btn btn-outline-secondary">📌 Kanban</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-    <div class="text-center mt-4">
-      <button id="sync-emails-btn" class="btn btn-outline-primary me-2">Sync Emails</button>
-      <button id="extract-action-items-btn" class="btn btn-outline-success">Extract Action Items</button>
-      <div id="dashboard-message" class="mt-3" style="display:none;"></div>
+  <div class="kanban row g-3 mb-4">
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header fw-semibold" style="background: var(--accent-light); color: var(--text-primary); border-bottom: 1px solid var(--border-neutral);">To do</div>
+        <div class="card-body">
+          {% for item in action_items if item.status == 'todo' %}
+            <div class="border-start border-3 border-primary ps-2 py-2 mb-2 rounded" style="background: var(--card-bg);">
+              {{ item.text }}{% if item.due_date %}<div class="text-muted small">Due: {{ item.due_date }}</div>{% endif %}
+            </div>
+          {% endfor %}
+          {% if not action_items or (action_items|selectattr('status','equalto','todo')|list|length == 0) %}
+            <p class="text-muted small mb-0">No items</p>
+          {% endif %}
+        </div>
+      </div>
     </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header fw-semibold" style="background: var(--accent-light); color: var(--text-primary); border-bottom: 1px solid var(--border-neutral);">Done</div>
+        <div class="card-body">
+          {% for item in action_items if item.status == 'done' %}
+            <div class="border-start border-3 border-success ps-2 py-2 mb-2 rounded" style="background: var(--card-bg); border-left-color: #15803d !important;">
+              {{ item.text }}{% if item.due_date %}<div class="text-muted small">Due: {{ item.due_date }}</div>{% endif %}
+            </div>
+          {% endfor %}
+          {% if not action_items or (action_items|selectattr('status','equalto','done')|list|length == 0) %}
+            <p class="text-muted small mb-0">No items</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="action-row d-flex flex-wrap gap-2 align-items-center">
+    <button id="sync-emails-btn" class="btn btn-outline-primary">Sync Emails</button>
+    <button id="extract-action-items-btn" class="btn btn-outline-success">Extract from docx (legacy)</button>
+    <div id="dashboard-message" class="mt-2" style="display:none;"></div>
   </div>
 </div>
-
 <script>
-function showMsg(t,err){const el=document.getElementById('dashboard-message');el.style.display='block';el.className='mt-3 '+(err?'text-danger':'text-success');el.textContent=t;}
-document.getElementById('sync-emails-btn').onclick = ()=>{ showMsg('Syncing...'); fetch('/sync_emails',{method:'POST'}).then(r=>r.json()).then(j=>{ if(j.success){ showMsg('Synced — reloading'); setTimeout(()=>location.reload(),800);} else showMsg('Sync failed',true);}).catch(()=>showMsg('Sync failed',true)); };
-document.getElementById('extract-action-items-btn').onclick = ()=>{ showMsg('Extracting...'); fetch('/extract_action_items',{method:'POST'}).then(r=>r.json()).then(j=>{ if(j.success){ showMsg('Extracted — reloading'); setTimeout(()=>location.reload(),800);} else showMsg('Extract failed',true);}).catch(()=>showMsg('Extract failed',true)); };
+function showMsg(t, err) {
+  var el = document.getElementById('dashboard-message');
+  el.style.display = 'block';
+  el.className = 'mt-2 ' + (err ? 'text-danger' : 'text-success');
+  el.textContent = t;
+}
+document.getElementById('sync-emails-btn').onclick = function() {
+  showMsg('Syncing...');
+  fetch('/sync_emails', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (j.success) { showMsg('Synced — reloading'); setTimeout(function() { location.reload(); }, 800); }
+      else showMsg('Sync failed', true);
+    })
+    .catch(function() { showMsg('Sync failed', true); });
+};
+document.getElementById('extract-action-items-btn').onclick = function() {
+  showMsg('Extracting...');
+  fetch('/extract_action_items', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (j.success) { showMsg('Extracted — reloading'); setTimeout(function() { location.reload(); }, 800); }
+      else showMsg('Extract failed', true);
+    })
+    .catch(function() { showMsg('Extract failed', true); });
+};
 
-document.getElementById('reply-emails-box').onclick = ()=> window.location.href = "{{ url_for('emails_full') }}";
-document.getElementById('view-action-items-box').onclick = ()=> window.location.href = "{{ url_for('action_items_full') }}";
+// --- Google Calendar monthly view ---
+(function() {
+  var calYearEl = document.getElementById('cal-month-year');
+  var calPrevBtn = document.getElementById('cal-prev');
+  var calNextBtn = document.getElementById('cal-next');
+  var calGridHolder = document.getElementById('calendar-grid-holder');
+  if (!calGridHolder) return;
 
-// user form handling
-function saveUser(n,e){localStorage.setItem('user_name',n);localStorage.setItem('user_email',e);}
-function loadUser(){return {name:localStorage.getItem('user_name'),email:localStorage.getItem('user_email')};}
-document.getElementById('user-form').onsubmit = function(e){ e.preventDefault(); const n=document.getElementById('user-name').value.trim(), em=document.getElementById('user-email').value.trim(); if(n&&em){ saveUser(n,em); showMain(); } };
-function showMain(){document.getElementById('user-pane').style.display='none';document.getElementById('main-dashboard').style.display='block';}
-window.onload = function(){ const u=loadUser(); if(u.name && u.email) showMain(); };
+  var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  var today = new Date();
+  var viewYear = today.getFullYear();
+  var viewMonth = today.getMonth() + 1;
+
+  function fetchAndRender() {
+    fetch('/api/calendar/events?year=' + viewYear + '&month=' + viewMonth)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        renderCalendarGrid(viewYear, viewMonth, data.events || []);
+      })
+      .catch(function() { renderCalendarGrid(viewYear, viewMonth, []); });
+  }
+
+  function renderCalendarGrid(year, month, events) {
+    var first = new Date(year, month - 1, 1);
+    var last = new Date(year, month, 0);
+    var daysInMonth = last.getDate();
+    var startWeekday = first.getDay();
+    var grid = document.createElement('div');
+    grid.className = 'calendar-grid';
+
+    var weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    weekdays.forEach(function(d) {
+      var h = document.createElement('div');
+      h.className = 'calendar-weekday';
+      h.textContent = d;
+      grid.appendChild(h);
+    });
+
+    var eventsByDate = {};
+    events.forEach(function(ev) {
+      var d = ev.date;
+      if (!eventsByDate[d]) eventsByDate[d] = [];
+      eventsByDate[d].push(ev);
+    });
+
+    var pad = startWeekday;
+    while (pad--) {
+      var cell = document.createElement('div');
+      cell.className = 'calendar-day other-month';
+      cell.innerHTML = '<span class="calendar-day-num"></span><ul class="calendar-day-events"></ul>';
+      grid.appendChild(cell);
+    }
+
+    for (var d = 1; d <= daysInMonth; d++) {
+      var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      var dayEvs = eventsByDate[dateStr] || [];
+      var cell = document.createElement('div');
+      cell.className = 'calendar-day';
+      var isToday = (today.getFullYear() === year && today.getMonth() + 1 === month && today.getDate() === d);
+      if (isToday) cell.classList.add('today');
+
+      var num = document.createElement('div');
+      num.className = 'calendar-day-num';
+      num.textContent = d;
+      cell.appendChild(num);
+
+      var ul = document.createElement('ul');
+      ul.className = 'calendar-day-events';
+      dayEvs.forEach(function(ev) {
+        var li = document.createElement('li');
+        li.className = ev.all_day ? 'all-day' : '';
+        li.title = 'Click to view details';
+        li.dataset.eventTitle = ev.title || '';
+        li.dataset.eventStart = ev.start || '';
+        li.dataset.eventEnd = ev.end || '';
+        li.dataset.eventDesc = (ev.description || '').replace(/"/g, '&quot;');
+        li.dataset.eventLink = ev.html_link || '';
+        if (ev.html_link) {
+          var a = document.createElement('a');
+          a.href = ev.html_link;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.textContent = ev.title;
+          a.style.color = 'inherit';
+          a.style.textDecoration = 'none';
+          a.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); showEventViewModal(ev); });
+          li.appendChild(a);
+        } else {
+          li.textContent = ev.title;
+          li.addEventListener('click', function() { showEventViewModal(ev); });
+        }
+        ul.appendChild(li);
+      });
+      cell.appendChild(ul);
+      grid.appendChild(cell);
+    }
+
+    calGridHolder.innerHTML = '';
+    calGridHolder.appendChild(grid);
+  }
+
+  function showEventViewModal(ev) {
+    document.getElementById('cal-view-event-title').textContent = ev.title || 'Event';
+    var whenText = ev.all_day ? (ev.start || ev.date || '') : ((ev.start || '') + ' – ' + (ev.end || ''));
+    document.getElementById('cal-view-event-when').textContent = whenText || '—';
+    var descEl = document.getElementById('cal-view-event-description');
+    descEl.textContent = ev.description || 'No description';
+    var linkEl = document.getElementById('cal-view-event-link');
+    linkEl.href = ev.html_link || '#';
+    linkEl.style.display = ev.html_link ? 'inline-block' : 'none';
+    new bootstrap.Modal(document.getElementById('cal-view-event-modal')).show();
+  }
+
+  if (calYearEl) calYearEl.textContent = monthNames[viewMonth - 1] + ' ' + viewYear;
+  var calAddBtn = document.getElementById('cal-add-event-btn');
+  if (calAddBtn) {
+    calAddBtn.onclick = function() {
+      var d = new Date();
+      document.getElementById('cal-event-date').value = d.toISOString().slice(0, 10);
+      document.getElementById('cal-event-title').value = '';
+      document.getElementById('cal-event-description').value = '';
+      document.getElementById('cal-event-all-day').checked = true;
+      document.getElementById('cal-event-time-row').style.display = 'none';
+      new bootstrap.Modal(document.getElementById('cal-add-event-modal')).show();
+    };
+  }
+  document.getElementById('cal-event-all-day').addEventListener('change', function() {
+    document.getElementById('cal-event-time-row').style.display = this.checked ? 'none' : '';
+  });
+  document.getElementById('cal-event-submit').onclick = function() {
+    var title = document.getElementById('cal-event-title').value.trim();
+    if (!title) { alert('Please enter a title'); return; }
+    var payload = {
+      title: title,
+      date: document.getElementById('cal-event-date').value,
+      description: document.getElementById('cal-event-description').value.trim() || null,
+      all_day: document.getElementById('cal-event-all-day').checked
+    };
+    if (!payload.all_day) {
+      payload.start_time = document.getElementById('cal-event-start-time').value;
+      payload.end_time = document.getElementById('cal-event-end-time').value;
+    }
+    fetch('/api/calendar/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (j.success) {
+        bootstrap.Modal.getInstance(document.getElementById('cal-add-event-modal')).hide();
+        fetchAndRender();
+      } else {
+        alert(j.error || 'Failed to add event');
+      }
+    })
+    .catch(function() { alert('Failed to add event'); });
+  };
+  if (calPrevBtn) {
+    calPrevBtn.onclick = function() {
+      viewMonth--;
+      if (viewMonth < 1) { viewMonth = 12; viewYear--; }
+      if (calYearEl) calYearEl.textContent = monthNames[viewMonth - 1] + ' ' + viewYear;
+      fetchAndRender();
+    };
+  }
+  if (calNextBtn) {
+    calNextBtn.onclick = function() {
+      viewMonth++;
+      if (viewMonth > 12) { viewMonth = 1; viewYear++; }
+      if (calYearEl) calYearEl.textContent = monthNames[viewMonth - 1] + ' ' + viewYear;
+      fetchAndRender();
+    };
+  }
+
+  fetchAndRender();
+})();
 </script>
-</body>
-</html>
+{% endblock %}

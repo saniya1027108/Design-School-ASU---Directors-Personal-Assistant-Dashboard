@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Settings - Personal Assistant{% endblock %}
+{% block extra_css %}
+.settings-card .form-label { font-size: 1.05rem; }
+.settings-card .form-control { font-size: 1.05rem; }
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0">
+  <h2 class="mb-4 fw-bold">Settings</h2>
+
+  <div class="card settings-card" style="max-width: 520px;">
+    <div class="card-header fw-semibold" style="font-size: 1.15rem;">Profile</div>
+    <div class="card-body">
+      <div class="mb-3">
+        <label class="form-label">Display name</label>
+        <input type="text" id="display-name" class="form-control" value="{{ settings.display_name or '' }}" placeholder="e.g. Paola">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Email</label>
+        <input type="email" id="profile-email" class="form-control" value="{{ settings.email or '' }}" placeholder="your@email.com">
+      </div>
+      <button type="button" class="btn btn-primary" id="save-settings-btn">Save</button>
+      <span id="settings-msg" class="ms-2 text-success small" style="display:none;">Saved.</span>
+    </div>
+  </div>
+</div>
+
+<script>
+document.getElementById('save-settings-btn').onclick = function() {
+  var displayName = document.getElementById('display-name').value.trim();
+  var email = document.getElementById('profile-email').value.trim();
+  fetch('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ display_name: displayName, email: email })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(j) {
+    var msg = document.getElementById('settings-msg');
+    msg.style.display = 'inline';
+    msg.className = 'ms-2 small ' + (j.success ? 'text-success' : 'text-danger');
+    msg.textContent = j.success ? 'Saved.' : 'Failed.';
+    setTimeout(function() { msg.style.display = 'none'; }, 2000);
+  })
+  .catch(function() {
+    document.getElementById('settings-msg').textContent = 'Error';
+    document.getElementById('settings-msg').className = 'ms-2 small text-danger';
+    document.getElementById('settings-msg').style.display = 'inline';
+  });
+};
+</script>
+{% endblock %}

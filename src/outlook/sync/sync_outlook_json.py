@@ -12,11 +12,12 @@ def sync_emails_to_json(output_path):
     emails = fetch_unread_emails()  # This should return a list of email dicts
 
     # Convert emails to a dashboard-friendly format
+    # "from" = display name (org chart or API name) for Sender column; "email" = address for replies
     dashboard_emails = []
     for e in emails:
         dashboard_emails.append({
             "id": e.get("message_id"),
-            "from": e.get("sender"),
+            "from": e.get("sender_display") or e.get("sender"),
             "subject": e.get("subject"),
             "email": e.get("sender"),
             "summary": e.get("snippet"),

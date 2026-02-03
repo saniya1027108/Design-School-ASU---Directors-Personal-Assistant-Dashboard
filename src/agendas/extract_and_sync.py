@@ -186,6 +186,32 @@ Meeting notes:
 Important: Return only valid JSON array. If there are no action items, return [].
 """
 
+# For raw meeting notes (no paragraph index / status tags) - e.g. from web note-taking tool
+EXTRACTION_PROMPT_RAW_NOTES = """
+You are a JSON-only extractor. Extract action items and to-dos from the meeting notes below.
+The notes are free-form (agendas, discussion points, decisions). Identify any actionable items, tasks, or to-dos.
+
+Return a JSON array of objects exactly like:
+[
+  {{
+    "text": "short description (required)",
+    "owner": "Full Name or null",
+    "owner_email": "email or null",
+    "due_date": "YYYY-MM-DD or null",
+    "priority": "low|medium|high",
+    "status": "todo",
+    "context": "one sentence summary of where it came from",
+    "paragraph_index": 0
+  }},
+  ...
+]
+
+Meeting notes:
+{meeting_text}
+
+Important: Return only valid JSON array. If there are no action items, return [].
+"""
+
 def call_openai_chat_completion(prompt: str) -> str:
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY not set.")
@@ -235,6 +261,42 @@ def extract_action_items_with_llm(meeting_text: str) -> List[Dict]:
             "status": status,
             "context": item.get("context", None),
             "paragraph_index": item.get("paragraph_index", None),
+        })
+    return normalized
+
+
+def extract_action_items_from_notes_text(meeting_notes: str) -> List[Dict]:
+    """
+    Extract action items from raw meeting notes (e.g. pasted in web note-taking tool).
+    Uses a simpler prompt than docx-based extraction. Returns list of normalized action items.
+    """
+    if not (meeting_notes or meeting_notes.strip()):
+        return []
+    prompt = EXTRACTION_PROMPT_RAW_NOTES.format(meeting_text=meeting_notes.strip())
+    raw = call_openai_chat_completion(prompt)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            parsed = json.loads(raw[start : end + 1])
+        else:
+            return []
+    normalized = []
+    for i, item in enumerate(parsed):
+        status = (item.get("status") or "todo").strip().lower()
+        if status not in ("todo", "done"):
+            status = "todo"
+        normalized.append({
+            "text": item.get("text") or "",
+            "owner": item.get("owner", None),
+            "owner_email": item.get("owner_email", None),
+            "due_date": item.get("due_date", None),
+            "priority": item.get("priority", "medium"),
+            "status": status,
+            "context": item.get("context", None),
+            "paragraph_index": item.get("paragraph_index", i),
         })
     return normalized
 

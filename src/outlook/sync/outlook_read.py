@@ -39,12 +39,27 @@ def load_org_chart():
 ORG_CHART = load_org_chart()
 
 def lookup_sender_category(sender_email):
-    sender_email = sender_email.lower()
+    sender_email = (sender_email or "").lower()
     for category, people in ORG_CHART.items():
         for name, email in people.items():
-            if sender_email == email.lower():
+            if email and sender_email == email.lower():
                 return category
     return "Others"
+
+
+def lookup_sender_name(sender_email):
+    """
+    If sender_email is in organization_chart.json, return the associated name.
+    Otherwise return None (caller can use API name or email).
+    """
+    if not sender_email:
+        return None
+    sender_email = sender_email.lower().strip()
+    for category, people in ORG_CHART.items():
+        for name, email in people.items():
+            if email and sender_email == email.lower():
+                return name
+    return None
 
 def determine_category_and_priority(sender_email, subject, snippet, full_body=""):
     category = lookup_sender_category(sender_email)
@@ -66,39 +81,52 @@ def determine_category_and_priority(sender_email, subject, snippet, full_body=""
     return category, priority
 
 
+def _parse_message(m):
+    """Parse a single message dict from Graph API into our format."""
+    subject = m.get("subject", "") or ""
+    sender_email = m.get("from", {}).get("emailAddress", {}).get("address", "") or ""
+    api_name = m.get("from", {}).get("emailAddress", {}).get("name", "") or ""
+    display_name = lookup_sender_name(sender_email) or api_name or sender_email
+    snippet = m.get("bodyPreview", "") or ""
+    message_id = m.get("id")
+    received_at = m.get("receivedDateTime")
+    full_body = m.get("body", {}).get("content", "") or snippet
+    category, priority = determine_category_and_priority(sender_email, subject, snippet, full_body)
+    return {
+        "subject": subject,
+        "sender": sender_email,
+        "sender_display": display_name,
+        "snippet": snippet,
+        "full_body": full_body,
+        "message_id": message_id,
+        "priority": priority,
+        "category": category,
+        "received_at": received_at,
+    }
+
+
 def fetch_unread_emails():
+    """Fetch all unread emails from inbox using Graph API pagination."""
     token = get_token()
     headers = {"Authorization": f"Bearer {token}"}
-    url = f"{GRAPH_BASE}/me/messages?$filter=isRead eq false&$top=20&$select=id,subject,from,bodyPreview,receivedDateTime,body"
-
-    resp = requests.get(url, headers=headers)
-    resp.raise_for_status()
-
-    mails = resp.json().get("value", [])
+    page_size = 500
+    url = (
+        f"{GRAPH_BASE}/me/messages"
+        f"?$filter=isRead eq false"
+        f"&$top={page_size}"
+        f"&$select=id,subject,from,bodyPreview,receivedDateTime,body"
+        f"&$orderby=receivedDateTime desc"
+    )
     parsed = []
 
-    for m in mails:
-        subject = m.get("subject", "") or ""
-        sender_email = m.get("from", {}).get("emailAddress", {}).get("address", "") or ""
-        sender_name = m.get("from", {}).get("emailAddress", {}).get("name", "") or sender_email
-        sender = f"{sender_name} <{sender_email}>"
-        snippet = m.get("bodyPreview", "") or ""
-        message_id = m.get("id")
-        received_at = m.get("receivedDateTime")
-        full_body = m.get("body", {}).get("content", "") or snippet
-
-        category, priority = determine_category_and_priority(sender_email, subject, snippet, full_body)
-
-        parsed.append({
-            "subject": subject,
-            "sender": sender_email,  # This is the email, used for lookup in Notion sync
-            "snippet": snippet,
-            "full_body": full_body,
-            "message_id": message_id,
-            "priority": priority,
-            "category": category,
-            "received_at": received_at,
-        })
+    while url:
+        resp = requests.get(url, headers=headers, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        mails = data.get("value", [])
+        for m in mails:
+            parsed.append(_parse_message(m))
+        url = data.get("@odata.nextLink")
 
     return parsed
 
@@ -128,5 +156,5 @@ if __name__ == "__main__":
     print("Fetched:", len(emails))
     for e in emails:
         print(f"Subject: {e['subject']}")
-        print(f"Sender: {e['sender_full']}")
+        print(f"Sender: {e.get('sender_display', e['sender'])}")
         print(f"Category: {e['category']} | Priority: {e['priority']}\n")

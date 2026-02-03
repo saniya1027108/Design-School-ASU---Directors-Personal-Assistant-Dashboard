@@ -54,7 +54,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 # Import your own sync logic (update these imports as needed)
 from outlook.sync.sync_outlook_json import sync_emails_to_json  # <-- update this to your new sync module
-from agendas.extract_and_sync import extract_action_items_from_docx  # <-- update as needed
+from agendas.extract_and_sync import extract_action_items_from_agendas
 from dashboard.app import run_dashboard
 
 def print_header():

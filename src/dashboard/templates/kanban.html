@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}Kanban - Personal Assistant{% endblock %}
+{% block main_content_class %}full-width{% endblock %}
+{% block extra_css %}
+#kanban-container { width: 100%; }
+.kanban-board { display: flex; gap: 1.5rem; width: 100%; padding-bottom: 1rem; min-height: 480px; }
+.kanban-col { flex: 1; min-width: 0; background: var(--accent-light); border: 1px solid var(--border-neutral); border-radius: 10px; padding: 1.25rem; }
+.kanban-col h6 { margin-bottom: 1rem; font-weight: 600; font-size: 1.2rem; color: var(--text-primary); }
+.kanban-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 1rem 1.1rem; margin-bottom: 0.75rem; box-shadow: var(--shadow-sm); cursor: grab; font-size: 1.05rem; color: var(--text-primary); }
+.kanban-card:active { cursor: grabbing; }
+.add-card { border: 2px dashed var(--border-neutral); border-radius: 8px; padding: 0.75rem 1rem; text-align: center; color: var(--text-muted); cursor: pointer; margin-top: 0.5rem; font-size: 1.05rem; }
+.add-card:hover { border-color: var(--accent); color: var(--accent); background: rgba(255,255,255,0.6); }
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 w-100">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-4">
+    <h2 class="mb-0 fw-bold">Kanban board</h2>
+    <div class="d-flex gap-2">
+      <select id="board-select" class="form-select form-select-sm" style="max-width: 260px; font-size: 1rem;">
+        {% for b in boards %}
+        <option value="{{ b.id }}">{{ b.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="btn btn-outline-primary" id="new-board-btn">+ New board</button>
+    </div>
+  </div>
+
+  <div id="kanban-container">
+    <div class="kanban-board" id="kanban-board">
+      <div class="kanban-col" data-column="todo">
+        <h6 class="text-primary">To do</h6>
+        <div id="col-todo" class="kanban-cards"></div>
+        <div class="add-card" data-column="todo">+ Add card</div>
+      </div>
+      <div class="kanban-col" data-column="in_progress">
+        <h6 class="text-warning">In progress</h6>
+        <div id="col-in_progress" class="kanban-cards"></div>
+        <div class="add-card" data-column="in_progress">+ Add card</div>
+      </div>
+      <div class="kanban-col" data-column="done">
+        <h6 class="text-success">Done</h6>
+        <div id="col-done" class="kanban-cards"></div>
+        <div class="add-card" data-column="done">+ Add card</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="newCardModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">New card</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="new-card-text" class="form-control" placeholder="Card title">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="add-card-submit">Add</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="newBoardModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">New board</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="new-board-name" class="form-control" placeholder="e.g. Kanban with Mireille">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="create-board-submit">Create</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var boards = {{ boards | tojson }};
+  var currentBoardId = boards.length ? boards[0].id : null;
+  var pendingNewCardColumn = null;
+
+  function getBoard() {
+    return boards.find(function(b) { return b.id === currentBoardId; });
+  }
+
+  function renderBoard() {
+    var board = getBoard();
+    if (!board) return;
+    var cols = board.columns || { todo: [], in_progress: [], done: [] };
+    ['todo', 'in_progress', 'done'].forEach(function(col) {
+      var el = document.getElementById('col-' + col);
+      if (!el) return;
+      el.innerHTML = '';
+      (cols[col] || []).forEach(function(card, i) {
+        var div = document.createElement('div');
+        div.className = 'kanban-card';
+        div.textContent = card.text || card.title || 'Untitled';
+        div.dataset.column = col;
+        div.dataset.index = i;
+        el.appendChild(div);
+      });
+    });
+  }
+
+  function saveBoard() {
+    var board = getBoard();
+    if (!board) return;
+    fetch('/api/boards/' + board.id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ columns: board.columns })
+    }).then(function(r) { return r.json(); }).then(function(j) {
+      if (!j.success) alert('Failed to save');
+    }).catch(function() { alert('Error'); });
+  }
+
+  document.getElementById('board-select').onchange = function() {
+    currentBoardId = this.value;
+    renderBoard();
+  };
+
+  document.getElementById('board-select').innerHTML = boards.map(function(b) {
+    return '<option value="' + b.id + '"' + (b.id === currentBoardId ? ' selected' : '') + '>' + b.name + '</option>';
+  }).join('');
+  if (boards.length) currentBoardId = boards[0].id;
+  renderBoard();
+
+  document.querySelectorAll('.add-card').forEach(function(el) {
+    el.onclick = function() {
+      pendingNewCardColumn = this.dataset.column;
+      document.getElementById('new-card-text').value = '';
+      new bootstrap.Modal(document.getElementById('newCardModal')).show();
+    };
+  });
+
+  document.getElementById('add-card-submit').onclick = function() {
+    var text = document.getElementById('new-card-text').value.trim();
+    if (!text) return;
+    var board = getBoard();
+    if (!board) return;
+    board.columns = board.columns || { todo: [], in_progress: [], done: [] };
+    if (!board.columns[pendingNewCardColumn]) board.columns[pendingNewCardColumn] = [];
+    board.columns[pendingNewCardColumn].push({ text: text });
+    saveBoard();
+    renderBoard();
+    bootstrap.Modal.getInstance(document.getElementById('newCardModal')).hide();
+  };
+
+  document.getElementById('new-board-btn').onclick = function() {
+    document.getElementById('new-board-name').value = '';
+    new bootstrap.Modal(document.getElementById('newBoardModal')).show();
+  };
+
+  document.getElementById('create-board-submit').onclick = function() {
+    var name = document.getElementById('new-board-name').value.trim() || 'New board';
+    fetch('/api/boards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, columns: { todo: [], in_progress: [], done: [] } })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (j.success && j.board) {
+        boards.push(j.board);
+        var opt = document.createElement('option');
+        opt.value = j.board.id;
+        opt.textContent = j.board.name;
+        opt.selected = true;
+        document.getElementById('board-select').appendChild(opt);
+        currentBoardId = j.board.id;
+        renderBoard();
+        bootstrap.Modal.getInstance(document.getElementById('newBoardModal')).hide();
+      } else alert('Failed to create board');
+    })
+    .catch(function() { alert('Error'); });
+  };
+})();
+</script>
+{% endblock %}
