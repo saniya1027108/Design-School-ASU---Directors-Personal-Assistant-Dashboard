@@ -19,13 +19,17 @@ SRC_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = SRC_DIR / "data"
 TOKEN_PATH = DATA_DIR / "google_calendar_token.json"
 
-# Scopes: calendar.events = read + create/update/delete events
-SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+# Scopes: calendar.events + Drive/Docs read (for agendas folder)
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/documents.readonly",
+]
 
 # OAuth2 endpoints
 GOOGLE_AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://127.0.0.1:5000/calendar/oauth2callback")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI_CALENDAR") or os.getenv("GOOGLE_REDIRECT_URI") or "http://127.0.0.1:5000/calendar/oauth2callback"
 
 
 def get_client_config():

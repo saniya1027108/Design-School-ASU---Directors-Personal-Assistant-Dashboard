@@ -30,6 +30,7 @@ DRAFTS_JSON = DATA_DIR / "drafts.json"
 MEETINGS_JSON = DATA_DIR / "meetings.json"
 BOARDS_JSON = DATA_DIR / "boards.json"
 USER_SETTINGS_JSON = DATA_DIR / "user_settings.json"
+DRIVE_AGENDAS_JSON = DATA_DIR / "drive_agendas.json"
 
 def _flatten_action_items(data):
     if isinstance(data, dict):
@@ -65,6 +66,26 @@ from outlook.sync.outlook_send import send_email
 from outlook.sync.revise_drafts import process_revisions
 from outlook.sync.send_approved_replies import send_approved_replies
 from agendas.extract_and_sync import extract_action_items_from_notes_text
+# Optional Google Docs helpers (service-account-backed helpers)
+try:
+    from agendas.extract_and_sync import (
+        process_google_doc_to_action_items,
+        process_google_docs_in_folder,
+        list_docs_in_folder,
+        fetch_google_doc_text,
+    )
+    HAS_GOOGLE_DOCS_INTEGRATION = True
+except Exception:
+    HAS_GOOGLE_DOCS_INTEGRATION = False
+
+# Optional OAuth flow libs
+try:
+    from google_auth_oauthlib.flow import Flow
+    from google.oauth2.credentials import Credentials as OAuthCredentials
+    from googleapiclient.discovery import build as g_build
+    GOOGLE_OAUTH_AVAILABLE = True
+except Exception:
+    GOOGLE_OAUTH_AVAILABLE = False
 
 # Google Calendar (optional)
 try:
@@ -86,6 +107,23 @@ def load_meetings():
 
 def save_meetings(meetings):
     save_json(MEETINGS_JSON, meetings)
+
+
+def load_drive_agendas():
+    """Load last Drive import result for display on Agendas tab. Returns dict with by_folder, last_import, etc."""
+    if not Path(DRIVE_AGENDAS_JSON).exists():
+        return {}
+    try:
+        with open(DRIVE_AGENDAS_JSON, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_drive_agendas(data):
+    save_json(DRIVE_AGENDAS_JSON, data)
+
 
 def load_boards():
     data = load_json(BOARDS_JSON)
@@ -182,6 +220,115 @@ def calendar_oauth2callback():
         pass
     return redirect(url_for("dashboard"))
 
+
+# ------------------
+# Google Docs OAuth
+# ------------------
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/documents.readonly",
+]
+
+def _user_creds_path():
+    uname = session.get("user_name") or "default"
+    return DATA_DIR / f"google_creds_{uname}.json"
+
+def _save_user_google_credentials(creds):
+    p = _user_creds_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        j = creds.to_json()
+    except Exception:
+        # fallback: build dict
+        j = json.dumps({
+            "token": creds.token,
+            "refresh_token": getattr(creds, "refresh_token", None),
+            "token_uri": creds.token_uri,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
+            "scopes": creds.scopes,
+        })
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(j)
+
+def _load_user_google_credentials():
+    p = _user_creds_path()
+    if not p.exists():
+        return None
+    if not GOOGLE_OAUTH_AVAILABLE:
+        return None
+    info = json.load(open(p, "r", encoding="utf-8"))
+    try:
+        creds = OAuthCredentials.from_authorized_user_info(info, scopes=SCOPES)
+        return creds
+    except Exception:
+        try:
+            # sometimes stored as JSON string
+            info2 = json.loads(info) if isinstance(info, str) else info
+            creds = OAuthCredentials.from_authorized_user_info(info2, scopes=SCOPES)
+            return creds
+        except Exception:
+            return None
+
+
+@app.route("/google_docs/connect")
+@login_required
+def google_docs_connect():
+    if not GOOGLE_OAUTH_AVAILABLE:
+        return redirect(url_for("agendas_list"))
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return redirect(url_for("agendas_list"))
+    # Use explicit env var if provided, otherwise build from request.url_root
+    env_redirect = os.getenv("GOOGLE_REDIRECT_URI_DOCS") or os.getenv("GOOGLE_REDIRECT_URI")
+    if env_redirect:
+        redirect_uri = env_redirect.rstrip('/')
+    else:
+        redirect_uri = request.url_root.rstrip('/') + "/google_docs/oauth2callback"
+    client_config = {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [redirect_uri],
+        }
+    }
+    flow = Flow.from_client_config(client_config, scopes=SCOPES, redirect_uri=redirect_uri)
+    auth_url, state = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent")
+    session["google_oauth_state"] = state
+    return redirect(auth_url)
+
+
+@app.route("/google_docs/oauth2callback")
+@login_required
+def google_docs_oauth2callback():
+    if not GOOGLE_OAUTH_AVAILABLE:
+        return redirect(url_for("agendas_list"))
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    env_redirect = os.getenv("GOOGLE_REDIRECT_URI_DOCS") or os.getenv("GOOGLE_REDIRECT_URI")
+    if env_redirect:
+        redirect_uri = env_redirect.rstrip('/')
+    else:
+        redirect_uri = request.url_root.rstrip('/') + "/google_docs/oauth2callback"
+    client_config = {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [redirect_uri],
+        }
+    }
+    state = session.get("google_oauth_state")
+    flow = Flow.from_client_config(client_config, scopes=SCOPES, state=state, redirect_uri=redirect_uri)
+    flow.fetch_token(authorization_response=request.url)
+    creds = flow.credentials
+    _save_user_google_credentials(creds)
+    return redirect(url_for("agendas_list"))
+
 @app.route("/api/calendar/events")
 @login_required
 def api_calendar_events():
@@ -243,6 +390,55 @@ def api_calendar_events_create():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# --- Google Drive Agendas (same OAuth as Calendar; folder structure = people/projects) ---
+try:
+    from google_calendar.drive_agendas import walk_agendas_and_extract
+    HAS_DRIVE_AGENDAS = True
+except Exception:
+    HAS_DRIVE_AGENDAS = False
+
+
+@app.route("/api/drive/agendas/extract", methods=["POST"])
+@login_required
+def api_drive_agendas_extract():
+    """
+    Extract action items from Google Docs in a Drive folder (and its subfolders).
+    Body: { "folder_id": optional (else from env GOOGLE_DRIVE_AGENDAS_FOLDER_ID), "merge": optional bool }
+    Returns by_folder structure; if merge=true, appends all items to action_items.json.
+    """
+    print("[Drive extract] POST /api/drive/agendas/extract received", flush=True)
+    if not HAS_DRIVE_AGENDAS:
+        return jsonify({"success": False, "error": "Drive agendas module not available"}), 500
+    data = request.json or {}
+    folder_id = data.get("folder_id") or os.getenv("GOOGLE_DRIVE_AGENDAS_FOLDER_ID")
+    if not folder_id:
+        return jsonify({"success": False, "error": "Folder ID required. Set GOOGLE_DRIVE_AGENDAS_FOLDER_ID in .env or pass folder_id in the request."}), 400
+    print("[Drive extract] Starting walk_agendas_and_extract for folder_id=%s..." % (folder_id[:20] + "..." if len(folder_id) > 20 else folder_id), flush=True)
+    result = walk_agendas_and_extract(root_folder_id=folder_id)
+    print("[Drive extract] Done. subfolders=%s, docs_in_root=%s" % (result.get("stats", {}).get("subfolders_found"), result.get("stats", {}).get("docs_in_root")), flush=True)
+    if result.get("error"):
+        return jsonify({"success": False, "error": result["error"], "by_folder": result.get("by_folder", {})}), 400
+    merge = data.get("merge", False)
+    if merge and result.get("all_items_flat"):
+        action_items = load_json(ACTION_ITEMS_JSON)
+        action_items.extend(result["all_items_flat"])
+        save_json(ACTION_ITEMS_JSON, action_items)
+    # Persist so Agendas tab can show these docs and their action items
+    save_drive_agendas({
+        "last_import": datetime.now().isoformat(),
+        "folder_id": folder_id,
+        "by_folder": result.get("by_folder", {}),
+        "stats": result.get("stats", {}),
+    })
+    return jsonify({
+        "success": True,
+        "by_folder": result.get("by_folder", {}),
+        "all_items_flat": result.get("all_items_flat", []),
+        "count": len(result.get("all_items_flat", [])),
+        "stats": result.get("stats", {}),
+    })
+
+
 @app.route("/emails_full")
 @login_required
 def emails_full():
@@ -269,7 +465,8 @@ def action_items_full():
             grouped[status].append(item)
         else:
             grouped["other"].append(item)
-    return render_template("action_items_full.html", grouped=grouped)
+    return render_template("actio" \
+    "n_items_full.html", grouped=grouped)
 
 @app.route("/sync_emails", methods=["POST"])
 @login_required
@@ -506,7 +703,13 @@ def agendas_list():
     meetings = load_meetings()
     staff_meetings = [m for m in meetings if (m.get("agenda_type") or "staff") == "staff"]
     project_meetings = [m for m in meetings if m.get("agenda_type") == "project"]
-    return render_template("agendas_list.html", staff_meetings=staff_meetings, project_meetings=project_meetings)
+    drive_agendas = load_drive_agendas()
+    return render_template(
+        "agendas_list.html",
+        staff_meetings=staff_meetings,
+        project_meetings=project_meetings,
+        drive_agendas=drive_agendas,
+    )
 
 @app.route("/agendas/<meeting_id>")
 @login_required
@@ -593,6 +796,137 @@ def api_meeting_action_items(meeting_id):
         meeting["action_items"] = data["action_items"]
         save_meetings(meetings)
     return jsonify({"success": True, "meeting": meeting})
+
+
+@app.route("/api/google_docs/list", methods=["GET"])
+@login_required
+def api_google_docs_list():
+    folder_id = request.args.get("folder_id")
+    if not folder_id:
+        return jsonify({"success": False, "error": "missing folder_id"}), 400
+
+    # Prefer service account helper if available
+    if HAS_GOOGLE_DOCS_INTEGRATION:
+        files = list_docs_in_folder(folder_id)
+        return jsonify({"success": True, "files": files})
+
+    # Fallback to per-user OAuth credentials
+    if not GOOGLE_OAUTH_AVAILABLE:
+        return jsonify({"success": False, "error": "Google APIs not available on server"}), 500
+    creds = _load_user_google_credentials()
+    if not creds:
+        return jsonify({"success": False, "error": "user Google credentials not found"}), 401
+    try:
+        drive = g_build("drive", "v3", credentials=creds)
+        q = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.document' and trashed=false"
+        results = drive.files().list(q=q, fields="files(id,name)", pageSize=1000).execute()
+        files = results.get("files", [])
+        return jsonify({"success": True, "files": files})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/google_docs/extract_doc", methods=["POST"])
+@login_required
+def api_google_docs_extract_doc():
+    # If service account helpers available, use them; otherwise use user OAuth credentials
+    data = request.json or {}
+    doc_id = data.get("doc_id")
+    meeting_id = data.get("meeting_id")
+    if not doc_id:
+        return jsonify({"success": False, "error": "missing doc_id"}), 400
+    items = []
+    if HAS_GOOGLE_DOCS_INTEGRATION:
+        items = process_google_doc_to_action_items(doc_id)
+    else:
+        if not GOOGLE_OAUTH_AVAILABLE:
+            return jsonify({"success": False, "error": "Google APIs not available on server"}), 500
+        creds = _load_user_google_credentials()
+        if not creds:
+            return jsonify({"success": False, "error": "user Google credentials not found"}), 401
+        try:
+            docs = g_build("docs", "v1", credentials=creds)
+            doc = docs.documents().get(documentId=doc_id).execute()
+            # extract text similar to extract_and_sync.fetch_google_doc_text
+            body = doc.get("body", {})
+            text_chunks = []
+            for content in body.get("content", []):
+                para = content.get("paragraph")
+                if not para:
+                    continue
+                for elem in para.get("elements", []):
+                    txt_run = elem.get("textRun")
+                    if txt_run and txt_run.get("content"):
+                        text_chunks.append(txt_run.get("content"))
+            text = "".join(text_chunks).strip()
+            from agendas.extract_and_sync import extract_action_items_from_notes_text
+            items = extract_action_items_from_notes_text(text)
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+    if meeting_id:
+        meetings = load_meetings()
+        meeting = next((m for m in meetings if str(m.get("id")) == str(meeting_id)), None)
+        if not meeting:
+            return jsonify({"success": False, "error": "meeting not found"}), 404
+        meeting.setdefault("action_items", [])
+        meeting["action_items"].extend(items)
+        save_meetings(meetings)
+    else:
+        action_items = load_json(ACTION_ITEMS_JSON)
+        action_items.extend(items)
+        save_json(ACTION_ITEMS_JSON, action_items)
+    return jsonify({"success": True, "count": len(items)})
+
+
+@app.route("/api/google_docs/extract_folder", methods=["POST"])
+@login_required
+def api_google_docs_extract_folder():
+    data = request.json or {}
+    folder_id = data.get("folder_id")
+    if not folder_id:
+        return jsonify({"success": False, "error": "missing folder_id"}), 400
+
+    items = []
+    # Service account path
+    if HAS_GOOGLE_DOCS_INTEGRATION:
+        items = process_google_docs_in_folder(folder_id)
+    else:
+        if not GOOGLE_OAUTH_AVAILABLE:
+            return jsonify({"success": False, "error": "Google APIs not available on server"}), 500
+        creds = _load_user_google_credentials()
+        if not creds:
+            return jsonify({"success": False, "error": "user Google credentials not found"}), 401
+        try:
+            drive = g_build("drive", "v3", credentials=creds)
+            q = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.document' and trashed=false"
+            results = drive.files().list(q=q, fields="files(id,name)", pageSize=1000).execute()
+            files = results.get("files", [])
+            from agendas.extract_and_sync import extract_action_items_from_notes_text
+            docs = g_build("docs", "v1", credentials=creds)
+            for f in files:
+                try:
+                    doc = docs.documents().get(documentId=f.get("id")).execute()
+                    body = doc.get("body", {})
+                    text_chunks = []
+                    for content in body.get("content", []):
+                        para = content.get("paragraph")
+                        if not para:
+                            continue
+                        for elem in para.get("elements", []):
+                            txt_run = elem.get("textRun")
+                            if txt_run and txt_run.get("content"):
+                                text_chunks.append(txt_run.get("content"))
+                    text = "".join(text_chunks).strip()
+                    items.extend(extract_action_items_from_notes_text(text))
+                except Exception:
+                    continue
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    action_items = load_json(ACTION_ITEMS_JSON)
+    action_items.extend(items)
+    save_json(ACTION_ITEMS_JSON, action_items)
+    return jsonify({"success": True, "count": len(items)})
 
 # --- Kanban (project tracker) ---
 @app.route("/kanban")

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Dashboard - Personal Assistant{% endblock %}
 {% block extra_css %}
-.calendar-wrap { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; box-shadow: var(--shadow-sm); overflow: hidden; }
-.calendar-header { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; background: var(--accent-light); border-bottom: 1px solid var(--border-neutral); }
+.calendar-wrap { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; box-shadow: var(--shadow-sm); overflow: hidden; border-left: 6px solid var(--color-calendar-accent); }
+.calendar-header { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; background: linear-gradient(90deg, var(--color-calendar-bg), transparent); border-bottom: 1px solid var(--border-neutral); }
 .calendar-header h3 { margin: 0; font-size: 1.2rem; font-weight: 600; }
 .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); width: 100%; }
 .calendar-weekday { padding: 0.4rem; text-align: center; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-neutral); background: var(--accent-light); }
@@ -15,6 +15,19 @@
 .calendar-day-events li.all-day { border-left-color: #15803d; }
 .calendar-day-events li { cursor: pointer; }
 .calendar-nav-btn { padding: 0.35rem 0.75rem; font-size: 0.95rem; }
+  /* Blue stat cards and buttons */
+  .card-blue { background: var(--color-blue-bg); border-color: rgba(59,130,246,0.12); }
+  .card-blue .card-body h3 { color: var(--color-blue-accent); }
+  .btn-blue { background: var(--color-blue-accent); border-color: var(--color-blue-accent); color: #fff; }
+  .btn-blue:hover { background: color-mix(in srgb, var(--color-blue-accent) 80%, #000 20%); }
+  .btn-outline-blue { border-color: var(--color-blue-accent); color: var(--color-blue-accent); }
+  .btn-outline-blue:hover { background: rgba(59,130,246,0.06); color: var(--color-blue-accent); }
+
+  /* To-do (soft red) and Done (light green) columns */
+  .card-todo .card-header { background: var(--color-todo-bg); border-bottom: 1px solid var(--border-neutral); }
+  .todo-item { border-left-color: var(--color-todo-accent) !important; }
+  .card-done .card-header { background: var(--color-done-bg); border-bottom: 1px solid var(--border-neutral); }
+  .done-item { border-left-color: var(--color-done-accent) !important; }
 {% endblock %}
 {% block content %}
 <div class="container-fluid px-0">
@@ -117,29 +130,29 @@
 
   <div class="row g-3 mb-4">
     <div class="col-md-4">
-      <div class="card h-100">
+      <div class="card h-100 card-blue">
         <div class="card-body">
           <h6 class="text-muted text-uppercase mb-2" style="font-size:1rem;">Emails</h6>
           <h3 class="mb-0">{{ emails|length }}</h3>
-          <a href="{{ url_for('emails_full') }}" class="btn btn-sm btn-outline-primary mt-2">View inbox</a>
+          <a href="{{ url_for('emails_full') }}" class="btn btn-sm btn-outline-blue mt-2">View inbox</a>
         </div>
       </div>
     </div>
     <div class="col-md-4">
-      <div class="card h-100">
+      <div class="card h-100 card-blue">
         <div class="card-body">
           <h6 class="text-muted text-uppercase mb-2" style="font-size:1rem;">Action items</h6>
           <h3 class="mb-0">{{ action_items|length }}</h3>
-          <a href="{{ url_for('action_items_full') }}" class="btn btn-sm btn-outline-primary mt-2">View all</a>
+          <a href="{{ url_for('action_items_full') }}" class="btn btn-sm btn-outline-blue mt-2">View all</a>
         </div>
       </div>
     </div>
     <div class="col-md-4">
-      <div class="card h-100">
+      <div class="card h-100 card-blue">
         <div class="card-body">
           <h6 class="text-muted text-uppercase mb-2" style="font-size:1rem;">Quick actions</h6>
           <div class="d-flex flex-wrap gap-2 mt-2">
-            <a href="{{ url_for('emails_full') }}" class="btn btn-primary">📧 Emails</a>
+            <a href="{{ url_for('emails_full') }}" class="btn btn-blue">📧 Emails</a>
             <a href="{{ url_for('agendas_list') }}" class="btn btn-outline-secondary">📋 Agendas</a>
             <a href="{{ url_for('kanban_board') }}" class="btn btn-outline-secondary">📌 Kanban</a>
           </div>
@@ -150,11 +163,11 @@
 
   <div class="kanban row g-3 mb-4">
     <div class="col-md-6">
-      <div class="card">
-        <div class="card-header fw-semibold" style="background: var(--accent-light); color: var(--text-primary); border-bottom: 1px solid var(--border-neutral);">To do</div>
+      <div class="card card-todo">
+        <div class="card-header fw-semibold" style="color: var(--text-primary);">To do</div>
         <div class="card-body">
           {% for item in action_items if item.status == 'todo' %}
-            <div class="border-start border-3 border-primary ps-2 py-2 mb-2 rounded" style="background: var(--card-bg);">
+            <div class="border-start border-3 todo-item ps-2 py-2 mb-2 rounded" style="background: var(--card-bg);">
               {{ item.text }}{% if item.due_date %}<div class="text-muted small">Due: {{ item.due_date }}</div>{% endif %}
             </div>
           {% endfor %}
@@ -165,11 +178,11 @@
       </div>
     </div>
     <div class="col-md-6">
-      <div class="card">
-        <div class="card-header fw-semibold" style="background: var(--accent-light); color: var(--text-primary); border-bottom: 1px solid var(--border-neutral);">Done</div>
+      <div class="card card-done">
+        <div class="card-header fw-semibold" style="color: var(--text-primary);">Done</div>
         <div class="card-body">
           {% for item in action_items if item.status == 'done' %}
-            <div class="border-start border-3 border-success ps-2 py-2 mb-2 rounded" style="background: var(--card-bg); border-left-color: #15803d !important;">
+            <div class="border-start border-3 done-item ps-2 py-2 mb-2 rounded" style="background: var(--card-bg);">
               {{ item.text }}{% if item.due_date %}<div class="text-muted small">Due: {{ item.due_date }}</div>{% endif %}
             </div>
           {% endfor %}

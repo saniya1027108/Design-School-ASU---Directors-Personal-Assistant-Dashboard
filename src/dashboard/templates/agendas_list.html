@@ -4,10 +4,61 @@
 .agenda-card .card-title { font-size: 1.2rem; }
 .agenda-card .card-text { font-size: 1rem; }
 .agenda-section-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-neutral); }
+.drive-agendas-header { background: var(--nav-bg); color: var(--nav-text); font-size: 1.1rem; font-weight: 600; padding: 0.6rem 1rem; border-radius: 8px; margin-bottom: 0.75rem; }
+.drive-agenda-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-neutral); }
+.drive-agenda-row:last-child { border-bottom: none; }
+.drive-agenda-doc-icon { width: 28px; height: 28px; flex-shrink: 0; color: var(--color-blue-accent); }
+.drive-agenda-doc-name { flex: 1; font-size: 1rem; }
+.drive-agenda-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+.drive-agenda-actions .btn { border-radius: 6px; }
+.drive-action-items-collapse { margin-top: 0.25rem; margin-left: 2.5rem; padding: 0.75rem; background: var(--accent-light); border-radius: 6px; font-size: 0.9rem; }
 {% endblock %}
 {% block content %}
 <div class="container-fluid px-0">
   <h2 class="mb-4 fw-bold">Agendas</h2>
+  <div class="mb-4 p-3 rounded" style="background: var(--accent-light); border: 1px solid var(--border-neutral);">
+    <h6 class="mb-2">Import from Google Drive</h6>
+    <p class="text-muted small mb-2">Extract action items from Google Docs in a Drive folder. Use a root &quot;Agendas&quot; folder whose <strong>subfolders</strong> are staff or projects; each subfolder can contain multiple Google Docs. Results are grouped by folder.</p>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button class="btn btn-primary" id="import-gdocs-folder-btn">Import from Drive folder…</button>
+      <a href="{{ url_for('calendar_connect') }}" class="btn btn-outline-secondary">Connect Google (Calendar + Drive)</a>
+    </div>
+  </div>
+
+  <!-- From Google Drive: staff agendas (1-1) with Notes / Action items -->
+  {% if drive_agendas and drive_agendas.get('by_folder') %}
+  <section class="mb-5">
+    <h3 class="drive-agendas-header">Staff agendas (1-1)</h3>
+    <p class="text-muted small mb-3">From last Drive import ({{ drive_agendas.get('last_import', '')[:10] or '—' }}). Re-import to refresh.</p>
+    <div class="rounded border" style="background: var(--card-bg); padding: 0 1rem;">
+      {% for folder_name, docs in drive_agendas.by_folder.items() %}
+        {% for doc in docs %}
+        <div class="drive-agenda-row">
+          <svg class="drive-agenda-doc-icon" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11zm-2-9h-2v6h2v-6zm-4 4h-2v6h2v-6zm-4-8h-2v10h2V7z"/></svg>
+          <span class="drive-agenda-doc-name">{{ doc.doc_name or 'Untitled' }}</span>
+          <div class="drive-agenda-actions">
+            <a href="{{ doc.doc_link or '#' }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">Notes</a>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#ai-{{ doc.doc_id | replace('.', '-') }}" aria-expanded="false">Action items</button>
+          </div>
+        </div>
+        <div class="collapse drive-action-items-collapse" id="ai-{{ doc.doc_id | replace('.', '-') }}">
+          {% if doc.error %}
+          <p class="text-danger small mb-0">{{ doc.error }}</p>
+          {% elif doc.get('items') %}
+          <ul class="mb-0 ps-3">
+            {% for item in doc.get('items', []) %}
+            <li class="mb-1">{{ item.text or item.get('text', item) }}</li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="text-muted small mb-0">No action items extracted.</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
 
   <!-- Staff agendas (1:1) -->
   <section class="mb-5">
@@ -80,6 +131,35 @@
   </section>
 </div>
 
+<!-- Import Google Drive folder modal -->
+<div class="modal fade" id="importGDocsFolderModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Import from Google Drive (Agendas folder)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Drive folder ID (root Agendas folder)</label>
+          <input type="text" id="gdocs-folder-id" class="form-control" placeholder="e.g. 1ABC... from the folder URL in Drive">
+          <small class="text-muted">From the folder URL: drive.google.com/drive/folders/<strong>FOLDER_ID</strong></small>
+        </div>
+        <div class="mb-3 form-check">
+          <input type="checkbox" class="form-check-input" id="gdocs-merge-check" checked>
+          <label class="form-check-label" for="gdocs-merge-check">Add extracted action items to Action Items dashboard</label>
+        </div>
+        <div id="gdocs-import-msg" style="display:none;" class="mb-2"></div>
+        <div id="gdocs-import-result" style="display:none;" class="border rounded p-3 bg-light"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" id="gdocs-import-submit">Extract from Drive</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="newMeetingModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -140,6 +220,84 @@
     })
     .catch(function() { alert('Error'); });
   };
+  // Import from Google Drive (folder structure = people/projects)
+  var importBtn = document.getElementById('import-gdocs-folder-btn');
+  if (importBtn) {
+    importBtn.addEventListener('click', function() {
+      document.getElementById('gdocs-import-result').style.display = 'none';
+      document.getElementById('gdocs-import-result').innerHTML = '';
+      new bootstrap.Modal(document.getElementById('importGDocsFolderModal')).show();
+    });
+  }
+  var submitImport = document.getElementById('gdocs-import-submit');
+  if (submitImport) {
+    submitImport.addEventListener('click', function() {
+      var fid = document.getElementById('gdocs-folder-id').value.trim();
+      if (!fid) { alert('Please enter a folder ID'); return; }
+      var merge = document.getElementById('gdocs-merge-check').checked;
+      var msg = document.getElementById('gdocs-import-msg');
+      var resultDiv = document.getElementById('gdocs-import-result');
+      msg.style.display = 'block';
+      msg.className = 'text-muted';
+      msg.textContent = 'Reading Drive folder and extracting action items…';
+      resultDiv.style.display = 'none';
+      resultDiv.innerHTML = '';
+      fetch('/api/drive/agendas/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_id: fid, merge: merge })
+      })
+      .then(function(r) {
+        if (!r.ok) {
+          return r.text().then(function(t) {
+            throw new Error('Server returned ' + r.status + (r.status === 401 ? ' (not logged in – try refreshing and logging in again)' : '') + (t && t.length < 150 ? ': ' + t : ''));
+          });
+        }
+        return r.json();
+      })
+      .then(function(j) {
+        if (j.success) {
+          var stats = j.stats || {};
+          var totalDocs = stats.total_docs_processed || 0;
+          msg.className = 'text-success';
+          msg.textContent = 'Extracted ' + (j.count || 0) + ' action items from ' + totalDocs + ' doc(s).' + (merge ? ' Added to Action Items dashboard.' : '');
+          if (totalDocs === 0) {
+            msg.className = 'text-warning';
+            msg.textContent = 'No Google Docs or .docx files found in this folder. The folder must contain native Google Docs or uploaded .docx files (not only subfolders with no docs, or other file types). Subfolders found: ' + (stats.subfolders_found || 0) + ', docs in root: ' + (stats.docs_in_root || 0) + '.';
+          }
+          var byFolder = j.by_folder || {};
+          var html = '<strong>By folder</strong><ul class="mb-0 mt-2">';
+          for (var folderName in byFolder) {
+            var docs = byFolder[folderName];
+            var total = 0;
+            docs.forEach(function(d) { total += (d.items && d.items.length) || 0; });
+            html += '<li><strong>' + folderName + '</strong>: ' + docs.length + ' doc(s), ' + total + ' action item(s)';
+            if (docs.length) {
+              html += '<ul class="small">';
+              docs.forEach(function(d) {
+                var err = d.error ? ' <span class="text-danger">(' + d.error + ')</span>' : '';
+                html += '<li>' + (d.doc_name || 'Untitled') + ': ' + ((d.items && d.items.length) || 0) + ' items' + err + '</li>';
+              });
+              html += '</ul>';
+            }
+            html += '</li>';
+          }
+          html += '</ul>';
+          resultDiv.innerHTML = html;
+          resultDiv.style.display = 'block';
+          // Reload so the Agendas tab shows the imported docs and action items
+          if (j.success) setTimeout(function() { location.reload(); }, 1500);
+        } else {
+          msg.className = 'text-danger';
+          msg.textContent = j.error || 'Import failed';
+        }
+      })
+      .catch(function(e) {
+        msg.className = 'text-danger';
+        msg.textContent = e && e.message ? e.message : 'Request failed. Check that you are logged in, the server is running in your terminal, and Google Drive is connected (Connect Google).';
+      });
+    });
+  }
 })();
 </script>
 {% endblock %}

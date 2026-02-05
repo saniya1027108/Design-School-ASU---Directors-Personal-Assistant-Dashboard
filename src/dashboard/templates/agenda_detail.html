@@ -12,6 +12,10 @@
     <a href="{{ url_for('agendas_list') }}" class="btn btn-outline-secondary btn-sm">← Agendas</a>
     <h2 class="mb-0 fw-bold">{{ meeting.title or 'Meeting' }}</h2>
     <span class="text-muted">{{ meeting.date or '—' }}{% if meeting.attendees %} · {{ meeting.attendees }}{% endif %}</span>
+    <div class="ms-auto d-flex gap-2">
+      <a href="/google_docs/connect" class="btn btn-outline-secondary btn-sm align-self-center">Connect Google</a>
+      <button class="btn btn-outline-primary btn-sm" id="import-gdoc-btn">Import from Google Doc</button>
+    </div>
   </div>
 
   <div class="row g-3">
@@ -57,6 +61,29 @@
   </div>
 </div>
 
+<!-- Import single Google Doc modal -->
+<div class="modal fade" id="importGDocModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Import from Google Doc</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Google Doc ID</label>
+          <input type="text" id="gdoc-id" class="form-control" placeholder="Enter Google Doc ID or URL">
+        </div>
+        <div id="gdoc-import-msg" style="display:none;" class="text-muted small"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="gdoc-import-submit">Import into meeting</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function() {
   var meetingId = '{{ meeting.id }}';
@@ -94,6 +121,25 @@
       alert('Error');
     });
   };
+
+  // Import Google Doc into this meeting
+  var importBtn = document.getElementById('import-gdoc-btn');
+  if (importBtn) importBtn.addEventListener('click', function() { new bootstrap.Modal(document.getElementById('importGDocModal')).show(); });
+  var importSubmit = document.getElementById('gdoc-import-submit');
+  if (importSubmit) importSubmit.addEventListener('click', function() {
+    var raw = document.getElementById('gdoc-id').value.trim();
+    if (!raw) { alert('Please enter a Google Doc ID or URL'); return; }
+    // attempt to extract doc id from url
+    var docId = raw;
+    var m = raw.match(/[-\w]{25,}/);
+    if (m) docId = m[0];
+    var msg = document.getElementById('gdoc-import-msg'); msg.style.display='block'; msg.textContent='Importing...';
+    fetch('/api/google_docs/extract_doc', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({doc_id: docId, meeting_id: meetingId}) })
+      .then(r=>r.json()).then(function(j){
+        if (j.success) { msg.textContent = 'Imported ' + (j.count||0) + ' action items — reloading'; setTimeout(()=>location.reload(),800); }
+        else { msg.textContent = j.error || 'Import failed'; }
+      }).catch(function(){ msg.textContent='Import failed'; });
+  });
 })();
 </script>
 {% endblock %}

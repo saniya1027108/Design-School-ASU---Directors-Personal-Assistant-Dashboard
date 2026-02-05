@@ -21,6 +21,15 @@ from pathlib import Path
 
 from docx import Document
 from dotenv import load_dotenv
+import os
+import logging
+# Optional Google APIs (service account or installed)
+try:
+    from googleapiclient.discovery import build
+    from google.oauth2 import service_account
+    GOOGLE_LIBS_AVAILABLE = True
+except Exception:
+    GOOGLE_LIBS_AVAILABLE = False
 import dateparser
 
 
@@ -299,6 +308,105 @@ def extract_action_items_from_notes_text(meeting_notes: str) -> List[Dict]:
             "paragraph_index": item.get("paragraph_index", i),
         })
     return normalized
+
+
+# -------------------------
+# Google Docs helpers
+# -------------------------
+def _get_google_credentials():
+    """Try to build credentials from a service account JSON pointed to by
+    the env var `GOOGLE_SERVICE_ACCOUNT_FILE`. Returns None if not available.
+    """
+    sa_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
+    if not sa_path:
+        return None
+    if not GOOGLE_LIBS_AVAILABLE:
+        return None
+    scopes = [
+        "https://www.googleapis.com/auth/documents.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+    try:
+        creds = service_account.Credentials.from_service_account_file(sa_path, scopes=scopes)
+        return creds
+    except Exception as e:
+        logging.warning("Failed to load service account credentials: %s", e)
+        return None
+
+
+def fetch_google_doc_text(doc_id: str) -> Optional[str]:
+    """Fetch plain text from a Google Doc using the Docs API.
+    Requires `GOOGLE_SERVICE_ACCOUNT_FILE` or the google libs present.
+    Returns the concatenated text or None on error.
+    """
+    creds = _get_google_credentials()
+    if not creds:
+        return None
+    try:
+        service = build("docs", "v1", credentials=creds)
+        doc = service.documents().get(documentId=doc_id).execute()
+        body = doc.get("body", {})
+        text_chunks = []
+        for content in body.get("content", []):
+            para = content.get("paragraph")
+            if not para:
+                continue
+            for elem in para.get("elements", []):
+                txt_run = elem.get("textRun")
+                if txt_run and txt_run.get("content"):
+                    text_chunks.append(txt_run.get("content"))
+        return "".join(text_chunks).strip()
+    except Exception as e:
+        logging.exception("Error fetching Google Doc %s: %s", doc_id, e)
+        return None
+
+
+def list_docs_in_folder(folder_id: str) -> List[Dict[str, str]]:
+    """List Google Docs (mime type application/vnd.google-apps.document) in a Drive folder.
+    Returns list of {id, name}. Requires service account or Drive API access.
+    """
+    creds = _get_google_credentials()
+    if not creds:
+        return []
+    try:
+        drive = build("drive", "v3", credentials=creds)
+        q = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.document' and trashed=false"
+        results = drive.files().list(q=q, fields="files(id,name)", pageSize=1000).execute()
+        files = results.get("files", [])
+        return files
+    except Exception as e:
+        logging.exception("Error listing files in folder %s: %s", folder_id, e)
+        return []
+
+
+def process_google_doc_to_action_items(doc_id: str, source_label: str = None) -> List[Dict]:
+    """Fetch a Google Doc, extract action items using the LLM extractor, and return list of items.
+    This function does not persist to Notion automatically; callers may save or upsert as needed.
+    """
+    text = fetch_google_doc_text(doc_id)
+    if not text:
+        return []
+    # Use raw notes extractor so we don't rely on paragraph indices
+    items = extract_action_items_from_notes_text(text)
+    # annotate source
+    for it in items:
+        it.setdefault("source", source_label or f"gdoc:{doc_id}")
+    return items
+
+
+def process_google_docs_in_folder(folder_id: str, source_label: str = None) -> List[Dict]:
+    """List docs in a folder and extract action items from each; returns flattened list."""
+    files = list_docs_in_folder(folder_id)
+    all_items: List[Dict] = []
+    for f in files:
+        doc_id = f.get("id")
+        label = source_label or f.get("name") or f"gdoc:{doc_id}"
+        try:
+            items = process_google_doc_to_action_items(doc_id, source_label=label)
+            all_items.extend(items)
+        except Exception:
+            logging.exception("Failed processing doc %s", doc_id)
+    return all_items
 
 
 # =========================
