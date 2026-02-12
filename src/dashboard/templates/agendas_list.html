@@ -1,62 +1,172 @@
 {% extends "base.html" %}
 {% block title %}Agendas - Personal Assistant{% endblock %}
+{% block main_content_class %}agendas-full-width{% endblock %}
 {% block extra_css %}
 .agenda-card .card-title { font-size: 1.2rem; }
 .agenda-card .card-text { font-size: 1rem; }
 .agenda-section-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-neutral); }
-.drive-agendas-header { background: var(--nav-bg); color: var(--nav-text); font-size: 1.1rem; font-weight: 600; padding: 0.6rem 1rem; border-radius: 8px; margin-bottom: 0.75rem; }
-.drive-agenda-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-neutral); }
-.drive-agenda-row:last-child { border-bottom: none; }
-.drive-agenda-doc-icon { width: 28px; height: 28px; flex-shrink: 0; color: var(--color-blue-accent); }
-.drive-agenda-doc-name { flex: 1; font-size: 1rem; }
-.drive-agenda-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
-.drive-agenda-actions .btn { border-radius: 6px; }
-.drive-action-items-collapse { margin-top: 0.25rem; margin-left: 2.5rem; padding: 0.75rem; background: var(--accent-light); border-radius: 6px; font-size: 0.9rem; }
+/* Drive agendas: gallery of category boxes (3 per row) + folder view */
+.drive-gallery { display: block; }
+.drive-gallery.hidden { display: none !important; }
+.drive-category-box { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 200px; padding: 2.25rem 1.75rem; border: 2px solid var(--border-neutral); border-radius: 14px; background: var(--card-bg); box-shadow: var(--shadow-sm); cursor: pointer; transition: all 0.2s; text-decoration: none; color: inherit; }
+.drive-category-box:hover { border-color: var(--accent); box-shadow: var(--shadow-md); background: var(--accent-light); transform: translateY(-2px); }
+.drive-category-box .category-icon { width: 60px; height: 60px; margin-bottom: 0.9rem; color: var(--accent); flex-shrink: 0; }
+.drive-category-box .category-name { font-size: 1.2rem; font-weight: 600; text-align: center; margin-bottom: 0.35rem; line-height: 1.3; }
+.drive-category-box .category-meta { font-size: 0.9rem; color: var(--text-muted); text-align: center; }
+.drive-folder-view { display: none; }
+.drive-folder-view.active { display: block; }
+.drive-back-bar { margin-bottom: 1.25rem; }
+/* Person/folder cards = large gallery boxes (2 per row on lg for bigger size) */
+.drive-person-card { border: 2px solid var(--card-border); border-radius: 14px; padding: 1.75rem; min-height: 320px; background: var(--card-bg); box-shadow: var(--shadow-sm); transition: all 0.2s; height: 100%; }
+.drive-person-card:hover { box-shadow: var(--shadow-md); border-color: var(--accent-soft); }
+.drive-person-card-header { font-size: 1.35rem; font-weight: 600; margin-bottom: 1.25rem; padding-bottom: 0.85rem; border-bottom: 2px solid var(--accent-soft); color: var(--accent); }
+/* Docs inside person card = grid of boxes (3 per row for better use of space) */
+.drive-docs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+@media (max-width: 992px) { .drive-docs-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 576px) { .drive-docs-grid { grid-template-columns: 1fr; } }
+.drive-doc-item { background: var(--surface-soft); border: 1px solid var(--border-neutral); border-radius: 10px; padding: 1rem; margin: 0; }
+.drive-doc-item .drive-doc-title { font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem; line-height: 1.3; }
+.drive-doc-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.drive-doc-actions .btn-sm { font-size: 0.8rem; padding: 0.35rem 0.6rem; }
+/* Action items as checkboxes */
+.action-items-checklist { padding: 0.75rem; background: var(--accent-light); border-radius: 8px; margin-top: 0.5rem; }
+.action-item-check { padding: 0.5rem 0; border-bottom: 1px solid var(--border-neutral); }
+.action-item-check:last-child { border-bottom: none; }
+.action-item-check .form-check-input { cursor: pointer; margin-top: 0.15rem; }
+.action-item-check .form-check-label { cursor: pointer; font-size: 0.9rem; line-height: 1.4; }
+.action-item-check .form-check-input:checked ~ .form-check-label { text-decoration: line-through; color: var(--text-muted); }
 {% endblock %}
 {% block content %}
-<div class="container-fluid px-0">
+<div class="container-fluid px-0 w-100">
   <h2 class="mb-4 fw-bold">Agendas</h2>
   <div class="mb-4 p-3 rounded" style="background: var(--accent-light); border: 1px solid var(--border-neutral);">
     <h6 class="mb-2">Import from Google Drive</h6>
-    <p class="text-muted small mb-2">Extract action items from Google Docs in a Drive folder. Use a root &quot;Agendas&quot; folder whose <strong>subfolders</strong> are staff or projects; each subfolder can contain multiple Google Docs. Results are grouped by folder.</p>
+    <p class="text-muted small mb-2">Extract action items from 2026 Google Docs. Structure: <strong>Root</strong> → <strong>Category folders</strong> (e.g. "Staff Meetings", "Projects") → <strong>Person/project folders</strong> → <strong>2026 docs</strong>. Only docs with "2026" in the title are extracted.</p>
     <div class="d-flex flex-wrap gap-2 align-items-center">
       <button class="btn btn-primary" id="import-gdocs-folder-btn">Import from Drive folder…</button>
       <a href="{{ url_for('calendar_connect') }}" class="btn btn-outline-secondary">Connect Google (Calendar + Drive)</a>
     </div>
   </div>
 
-  <!-- From Google Drive: staff agendas (1-1) with Notes / Action items -->
+  <!-- From Google Drive: Gallery of category boxes (3 per row); click opens folder view with person cards -->
   {% if drive_agendas and drive_agendas.get('by_folder') %}
   <section class="mb-5">
-    <h3 class="drive-agendas-header">Staff agendas (1-1)</h3>
-    <p class="text-muted small mb-3">From last Drive import ({{ drive_agendas.get('last_import', '')[:10] or '—' }}). Re-import to refresh.</p>
-    <div class="rounded border" style="background: var(--card-bg); padding: 0 1rem;">
-      {% for folder_name, docs in drive_agendas.by_folder.items() %}
-        {% for doc in docs %}
-        <div class="drive-agenda-row">
-          <svg class="drive-agenda-doc-icon" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11zm-2-9h-2v6h2v-6zm-4 4h-2v6h2v-6zm-4-8h-2v10h2V7z"/></svg>
-          <span class="drive-agenda-doc-name">{{ doc.doc_name or 'Untitled' }}</span>
-          <div class="drive-agenda-actions">
-            <a href="{{ doc.doc_link or '#' }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">Notes</a>
-            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#ai-{{ doc.doc_id | replace('.', '-') }}" aria-expanded="false">Action items</button>
-          </div>
-        </div>
-        <div class="collapse drive-action-items-collapse" id="ai-{{ doc.doc_id | replace('.', '-') }}">
-          {% if doc.error %}
-          <p class="text-danger small mb-0">{{ doc.error }}</p>
-          {% elif doc.get('items') %}
-          <ul class="mb-0 ps-3">
-            {% for item in doc.get('items', []) %}
-            <li class="mb-1">{{ item.text or item.get('text', item) }}</li>
-            {% endfor %}
-          </ul>
-          {% else %}
-          <p class="text-muted small mb-0">No action items extracted.</p>
-          {% endif %}
-        </div>
-        {% endfor %}
-      {% endfor %}
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <h2 class="mb-0 fw-bold">Google Drive Agendas (2026)</h2>
+      <span class="text-muted small">Last import: {{ drive_agendas.get('last_import', '')[:10] or '—' }}</span>
     </div>
+    
+    {% set first_value = drive_agendas.by_folder.values()|first %}
+    {% if first_value is mapping %}
+      {# Gallery: big category boxes (3 per row); click opens folder view #}
+      <div id="drive-gallery" class="drive-gallery">
+        <p class="text-muted small mb-3">Click a category to open its agendas.</p>
+        <div class="row g-4">
+          {% for category_name, person_folders in drive_agendas.by_folder.items() %}
+          {% set ns = namespace(total_docs=0) %}
+          {% for doclist in person_folders.values() %}{% set ns.total_docs = ns.total_docs + doclist|length %}{% endfor %}
+          <div class="col-12 col-md-6 col-lg-4">
+            <a href="javascript:void(0)" class="drive-category-box text-decoration-none" data-category-id="cat-{{ loop.index }}" role="button">
+              <svg class="category-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+              <span class="category-name">{{ category_name }}</span>
+              <span class="category-meta">{{ person_folders|length }} folder{{ 's' if person_folders|length != 1 else '' }} · {{ ns.total_docs }} doc{{ 's' if ns.total_docs != 1 else '' }}</span>
+            </a>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Folder views: one per category (person cards, 3 per row); shown when category box is clicked -->
+      {% for category_name, person_folders in drive_agendas.by_folder.items() %}
+      <div id="cat-{{ loop.index }}" class="drive-folder-view" data-category-name="{{ category_name }}">
+        <div class="drive-back-bar">
+          <button type="button" class="btn btn-outline-secondary btn-sm drive-back-btn" aria-label="Back to categories">
+            ← Back to categories
+          </button>
+        </div>
+        <h3 class="mb-4 fw-bold">{{ category_name }}</h3>
+        <div class="row g-4">
+          {% for person_name, docs in person_folders.items() %}
+          <div class="col-12 col-md-6 col-lg-6">
+            <div class="drive-person-card">
+              <div class="drive-person-card-header">
+                <svg style="width: 20px; height: 20px; display: inline-block; vertical-align: middle; margin-right: 0.4rem;" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                {{ person_name }}
+              </div>
+              
+              {% if docs %}
+                <div class="drive-docs-grid">
+                {% for doc in docs %}
+                <div class="drive-doc-item">
+                  <div class="drive-doc-title">
+                    <svg style="width: 16px; height: 16px; display: inline-block; vertical-align: middle; margin-right: 0.3rem; color: var(--color-blue-accent);" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+                    {{ doc.doc_name or 'Untitled' }}
+                  </div>
+                  <div class="drive-doc-actions">
+                    <a href="{{ doc.doc_link or '#' }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">📄 Notes</a>
+                    <a href="{{ url_for('agenda_drive_action_items', doc_id=doc.doc_id) }}" class="btn btn-sm btn-outline-primary">
+                      ✓ Action items ({{ doc.get('items', [])|length }})
+                    </a>
+                  </div>
+                </div>
+                {% endfor %}
+                </div>
+              {% else %}
+              <p class="text-muted small mb-0">No documents found.</p>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    
+    <script>
+    (function() {
+      var gallery = document.getElementById('drive-gallery');
+      if (!gallery) return;
+      var categoryBoxes = gallery.querySelectorAll('.drive-category-box');
+      var folderViews = document.querySelectorAll('.drive-folder-view');
+      var backBtns = document.querySelectorAll('.drive-back-btn');
+      function showGallery() {
+        gallery.classList.remove('hidden');
+        folderViews.forEach(function(v) { v.classList.remove('active'); });
+      }
+      function showFolderView(id) {
+        gallery.classList.add('hidden');
+        folderViews.forEach(function(v) {
+          v.classList.toggle('active', v.id === id);
+        });
+      }
+      categoryBoxes.forEach(function(box) {
+        box.addEventListener('click', function() {
+          var id = box.getAttribute('data-category-id');
+          if (id) showFolderView(id);
+        });
+      });
+      backBtns.forEach(function(btn) {
+        btn.addEventListener('click', showGallery);
+      });
+    })();
+    </script>
+    
+    {% else %}
+      {# Old 2-level structure: needs re-import #}
+      <div class="alert alert-warning">
+        <h5>⚠️ Old Data Format Detected</h5>
+        <p class="mb-2">Your saved Drive agendas use an older format. The new version supports:</p>
+        <ul class="mb-3">
+          <li><strong>3-level folder structure</strong>: Category folders → Person folders → 2026 docs</li>
+          <li><strong>Tabbed categories</strong> (Staff Meetings, Projects, etc.)</li>
+          <li><strong>Card grid layout</strong> (3 per row)</li>
+          <li><strong>Checkbox to-do lists</strong> for action items</li>
+        </ul>
+        <p class="mb-0">
+          <strong>To use the new interface:</strong> Click <strong>"Import from Drive folder…"</strong> above and run the extraction again. 
+          The new data will replace this old format.
+        </p>
+      </div>
+    {% endif %}
   </section>
   {% endif %}
 
@@ -259,28 +369,37 @@
         if (j.success) {
           var stats = j.stats || {};
           var totalDocs = stats.total_docs_processed || 0;
+          var categoryCount = stats.category_folders || 0;
           msg.className = 'text-success';
-          msg.textContent = 'Extracted ' + (j.count || 0) + ' action items from ' + totalDocs + ' doc(s).' + (merge ? ' Added to Action Items dashboard.' : '');
+          msg.textContent = 'Extracted ' + (j.count || 0) + ' action items from ' + totalDocs + ' 2026 doc(s) in ' + categoryCount + ' category folder(s).' + (merge ? ' Added to Action Items dashboard.' : '');
           if (totalDocs === 0) {
             msg.className = 'text-warning';
-            msg.textContent = 'No Google Docs or .docx files found in this folder. The folder must contain native Google Docs or uploaded .docx files (not only subfolders with no docs, or other file types). Subfolders found: ' + (stats.subfolders_found || 0) + ', docs in root: ' + (stats.docs_in_root || 0) + '.';
+            msg.textContent = 'No 2026 Google Docs found. Make sure your folder structure is: Root → Category folders (e.g. "Staff Meetings") → Person folders → Docs with "2026" in the title.';
           }
           var byFolder = j.by_folder || {};
-          var html = '<strong>By folder</strong><ul class="mb-0 mt-2">';
-          for (var folderName in byFolder) {
-            var docs = byFolder[folderName];
-            var total = 0;
-            docs.forEach(function(d) { total += (d.items && d.items.length) || 0; });
-            html += '<li><strong>' + folderName + '</strong>: ' + docs.length + ' doc(s), ' + total + ' action item(s)';
-            if (docs.length) {
-              html += '<ul class="small">';
-              docs.forEach(function(d) {
-                var err = d.error ? ' <span class="text-danger">(' + d.error + ')</span>' : '';
-                html += '<li>' + (d.doc_name || 'Untitled') + ': ' + ((d.items && d.items.length) || 0) + ' items' + err + '</li>';
-              });
-              html += '</ul>';
+          var html = '<strong>By Category</strong><ul class="mb-0 mt-2">';
+          for (var categoryName in byFolder) {
+            var personFolders = byFolder[categoryName];
+            var catTotal = 0;
+            var catDocs = 0;
+            for (var personName in personFolders) {
+              var docs = personFolders[personName];
+              catDocs += docs.length;
+              docs.forEach(function(d) { catTotal += (d.items && d.items.length) || 0; });
             }
-            html += '</li>';
+            html += '<li><strong>' + categoryName + '</strong>: ' + Object.keys(personFolders).length + ' person/project folder(s), ' + catDocs + ' doc(s), ' + catTotal + ' action item(s)';
+            html += '<ul class="small">';
+            for (var personName in personFolders) {
+              var docs = personFolders[personName];
+              var total = 0;
+              docs.forEach(function(d) { total += (d.items && d.items.length) || 0; });
+              html += '<li><strong>' + personName + '</strong>: ' + docs.length + ' doc(s), ' + total + ' items';
+              if (docs.length && docs.some(function(d) { return d.error; })) {
+                html += ' <span class="text-danger">(some docs had errors)</span>';
+              }
+              html += '</li>';
+            }
+            html += '</ul></li>';
           }
           html += '</ul>';
           resultDiv.innerHTML = html;

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Action Items — {{ doc_name }}{% endblock %}
+{% block main_content_class %}agendas-full-width{% endblock %}
+{% block extra_css %}
+.ai-page-header { margin-bottom: 1.5rem; }
+.ai-doc-title { font-size: 1.5rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem; }
+.ai-meta { font-size: 0.95rem; color: var(--text-muted); margin-bottom: 1rem; }
+.ai-actions-bar { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.5rem; }
+.ai-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; }
+@media (max-width: 992px) { .ai-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 576px) { .ai-grid { grid-template-columns: 1fr; } }
+.ai-card { background: var(--card-bg); border: 2px solid var(--card-border); border-radius: 12px; padding: 1.25rem; min-height: 120px; display: flex; flex-direction: column; transition: box-shadow 0.2s; }
+.ai-card:hover { box-shadow: var(--shadow-md); }
+.ai-card .form-check { flex: 1; display: flex; align-items: flex-start; gap: 0.75rem; }
+.ai-card .form-check-input { margin-top: 0.2rem; flex-shrink: 0; cursor: pointer; }
+.ai-card .form-check-label { cursor: pointer; font-size: 1rem; line-height: 1.45; color: var(--text-primary); }
+.ai-card .form-check-input:checked ~ .form-check-label { text-decoration: line-through; color: var(--text-muted); }
+.ai-card-meta { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-neutral); }
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 w-100">
+  <a href="{{ url_for('agendas_list') }}" class="btn btn-outline-secondary btn-sm mb-3">← Back to Agendas</a>
+
+  <div class="ai-page-header">
+    <h1 class="ai-doc-title">{{ doc_name }}</h1>
+    <p class="ai-meta">{{ category_name }} · {{ person_name }}</p>
+    <div class="ai-actions-bar">
+      <a href="{{ doc_link }}" target="_blank" rel="noopener" class="btn btn-outline-secondary">📄 Open notes (Google Doc)</a>
+    </div>
+  </div>
+
+  {% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+  {% elif items %}
+  <h2 class="h5 fw-bold mb-3">Action Items ({{ items|length }})</h2>
+  <div class="ai-grid">
+    {% for item in items %}
+    <div class="ai-card">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="ai-{{ doc_id | replace('.', '-') }}-{{ loop.index }}">
+        <label class="form-check-label" for="ai-{{ doc_id | replace('.', '-') }}-{{ loop.index }}">
+          {{ item.text or item.get('text', item) }}
+        </label>
+      </div>
+      <div class="ai-card-meta">
+        {% if item.get('owner') %}<span>— {{ item.owner }}</span>{% endif %}
+        {% if item.get('due_date') %}<span> · Due: {{ item.due_date }}</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted">No action items for this document.</p>
+  {% endif %}
+</div>
+{% endblock %}

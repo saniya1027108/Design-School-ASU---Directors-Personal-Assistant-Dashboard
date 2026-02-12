@@ -125,6 +125,58 @@ def save_drive_agendas(data):
     save_json(DRIVE_AGENDAS_JSON, data)
 
 
+def _is_archived_name(name):
+    """Match **Archive / *Archive / Archived folder names for filtering from UI."""
+    if not name or not isinstance(name, str):
+        return False
+    n = name.strip().lower()
+    if "archive" not in n:
+        return False
+    if n.startswith("**") or "**archive" in n or (n.startswith("*") and "archive" in n):
+        return True
+    return False
+
+
+def _find_doc_in_drive_agendas(drive_agendas, doc_id):
+    """Return dict with doc (doc_name, doc_link, items, error) and meta (category_name, person_name) or None."""
+    if not drive_agendas or not isinstance(drive_agendas.get("by_folder"), dict):
+        return None
+    for cat_name, person_folders in drive_agendas["by_folder"].items():
+        if not isinstance(person_folders, dict):
+            continue
+        for person_name, docs in person_folders.items():
+            if not isinstance(docs, list):
+                continue
+            for doc in docs:
+                if doc.get("doc_id") == doc_id:
+                    return {
+                        "doc": doc,
+                        "category_name": cat_name,
+                        "person_name": person_name,
+                    }
+    return None
+
+
+def _filter_archived_from_drive_agendas(data):
+    """Remove archived categories and archived person folders from drive_agendas for display."""
+    if not data or not isinstance(data.get("by_folder"), dict):
+        return data
+    by_folder = data["by_folder"]
+    first_val = next(iter(by_folder.values()), None)
+    if not isinstance(first_val, dict):
+        return data
+    out = dict(data)
+    out["by_folder"] = {}
+    for cat_name, person_folders in by_folder.items():
+        if _is_archived_name(cat_name):
+            continue
+        out["by_folder"][cat_name] = {
+            pname: docs for pname, docs in person_folders.items()
+            if not _is_archived_name(pname)
+        }
+    return out
+
+
 def load_boards():
     data = load_json(BOARDS_JSON)
     if isinstance(data, list):
@@ -178,18 +230,33 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+def _sort_key_due_first(item):
+    """Sort key: items with due_date first (earliest first), then items without."""
+    d = item.get("due_date")
+    if not d:
+        return (1, "9999-99-99")  # no date last
+    return (0, d)
+
+
 @app.route("/")
 @login_required
 def dashboard():
     emails = load_json(EMAILS_JSON)
     action_items = load_json(ACTION_ITEMS_JSON)
     drafts = load_json(DRAFTS_JSON)
+    # Dashboard shows only 10 to-do and 10 done, sorted by due date (dated first, then no date)
+    todo_only = [i for i in action_items if (i.get("status") or "todo").lower() == "todo"]
+    done_only = [i for i in action_items if (i.get("status") or "").lower() == "done"]
+    dashboard_todo_items = sorted(todo_only, key=_sort_key_due_first)[:10]
+    dashboard_done_items = sorted(done_only, key=_sort_key_due_first)[:10]
     calendar_connected = HAS_GOOGLE_CALENDAR and calendar_is_connected() if HAS_GOOGLE_CALENDAR else False
     calendar_configured = HAS_GOOGLE_CALENDAR and calendar_is_configured() if HAS_GOOGLE_CALENDAR else False
     return render_template(
         "dashboard.html",
         emails=emails,
         action_items=action_items,
+        dashboard_todo_items=dashboard_todo_items,
+        dashboard_done_items=dashboard_done_items,
         drafts=drafts,
         calendar_connected=calendar_connected,
         calendar_configured=calendar_configured,
@@ -415,7 +482,7 @@ def api_drive_agendas_extract():
         return jsonify({"success": False, "error": "Folder ID required. Set GOOGLE_DRIVE_AGENDAS_FOLDER_ID in .env or pass folder_id in the request."}), 400
     print("[Drive extract] Starting walk_agendas_and_extract for folder_id=%s..." % (folder_id[:20] + "..." if len(folder_id) > 20 else folder_id), flush=True)
     result = walk_agendas_and_extract(root_folder_id=folder_id)
-    print("[Drive extract] Done. subfolders=%s, docs_in_root=%s" % (result.get("stats", {}).get("subfolders_found"), result.get("stats", {}).get("docs_in_root")), flush=True)
+    print("[Drive extract] Done. categories=%s, total_docs=%s" % (result.get("stats", {}).get("category_folders"), result.get("stats", {}).get("total_docs_processed")), flush=True)
     if result.get("error"):
         return jsonify({"success": False, "error": result["error"], "by_folder": result.get("by_folder", {})}), 400
     merge = data.get("merge", False)
@@ -703,13 +770,34 @@ def agendas_list():
     meetings = load_meetings()
     staff_meetings = [m for m in meetings if (m.get("agenda_type") or "staff") == "staff"]
     project_meetings = [m for m in meetings if m.get("agenda_type") == "project"]
-    drive_agendas = load_drive_agendas()
+    drive_agendas = _filter_archived_from_drive_agendas(load_drive_agendas())
     return render_template(
         "agendas_list.html",
         staff_meetings=staff_meetings,
         project_meetings=project_meetings,
         drive_agendas=drive_agendas,
     )
+
+@app.route("/agendas/drive/action-items/<doc_id>")
+@login_required
+def agenda_drive_action_items(doc_id):
+    """Full-page view of action items for a Drive doc (by doc_id)."""
+    drive_agendas = _filter_archived_from_drive_agendas(load_drive_agendas())
+    found = _find_doc_in_drive_agendas(drive_agendas, doc_id)
+    if not found:
+        return redirect(url_for("agendas_list"))
+    doc = found["doc"]
+    return render_template(
+        "agenda_action_items.html",
+        doc_name=doc.get("doc_name", "Untitled"),
+        doc_link=doc.get("doc_link", "#"),
+        doc_id=doc_id,
+        category_name=found["category_name"],
+        person_name=found["person_name"],
+        items=doc.get("items") or [],
+        error=doc.get("error"),
+    )
+
 
 @app.route("/agendas/<meeting_id>")
 @login_required

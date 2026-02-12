@@ -166,13 +166,20 @@
       <div class="card card-todo">
         <div class="card-header fw-semibold" style="color: var(--text-primary);">To do</div>
         <div class="card-body">
-          {% for item in action_items if item.status == 'todo' %}
+          {% for item in dashboard_todo_items %}
             <div class="border-start border-3 todo-item ps-2 py-2 mb-2 rounded" style="background: var(--card-bg);">
-              {{ item.text }}{% if item.due_date %}<div class="text-muted small">Due: {{ item.due_date }}</div>{% endif %}
+              <div class="fw-medium">{{ item.text }}</div>
+              <div class="text-muted small mt-1">
+                {% if item.source_folder or item.source_category or item.source %}<span class="me-2">📁 {{ item.source_folder or item.source_category or item.source }}</span>{% endif %}
+                {% if item.owner %}<span class="me-2">👤 {{ item.owner }}</span>{% endif %}
+                {% if item.due_date %}<span>📅 Due: {{ item.due_date }}</span>{% endif %}
+              </div>
             </div>
           {% endfor %}
-          {% if not action_items or (action_items|selectattr('status','equalto','todo')|list|length == 0) %}
+          {% if not dashboard_todo_items %}
             <p class="text-muted small mb-0">No items</p>
+          {% elif (action_items|selectattr('status','equalto','todo')|list|length) > 10 %}
+            <p class="text-muted small mb-0"><a href="{{ url_for('action_items_full') }}">View all {{ action_items|selectattr('status','equalto','todo')|list|length }} to-do items</a></p>
           {% endif %}
         </div>
       </div>
@@ -181,13 +188,20 @@
       <div class="card card-done">
         <div class="card-header fw-semibold" style="color: var(--text-primary);">Done</div>
         <div class="card-body">
-          {% for item in action_items if item.status == 'done' %}
+          {% for item in dashboard_done_items %}
             <div class="border-start border-3 done-item ps-2 py-2 mb-2 rounded" style="background: var(--card-bg);">
-              {{ item.text }}{% if item.due_date %}<div class="text-muted small">Due: {{ item.due_date }}</div>{% endif %}
+              <div class="fw-medium">{{ item.text }}</div>
+              <div class="text-muted small mt-1">
+                {% if item.source_folder or item.source_category or item.source %}<span class="me-2">📁 {{ item.source_folder or item.source_category or item.source }}</span>{% endif %}
+                {% if item.owner %}<span class="me-2">👤 {{ item.owner }}</span>{% endif %}
+                {% if item.due_date %}<span>📅 Due: {{ item.due_date }}</span>{% endif %}
+              </div>
             </div>
           {% endfor %}
-          {% if not action_items or (action_items|selectattr('status','equalto','done')|list|length == 0) %}
+          {% if not dashboard_done_items %}
             <p class="text-muted small mb-0">No items</p>
+          {% elif (action_items|selectattr('status','equalto','done')|list|length) > 10 %}
+            <p class="text-muted small mb-0"><a href="{{ url_for('action_items_full') }}">View all {{ action_items|selectattr('status','equalto','done')|list|length }} done items</a></p>
           {% endif %}
         </div>
       </div>

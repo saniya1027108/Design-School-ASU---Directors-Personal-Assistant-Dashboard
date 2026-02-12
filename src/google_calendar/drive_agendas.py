@@ -137,19 +137,21 @@ def get_docx_text(file_id, drive=None):
 
 def walk_agendas_and_extract(root_folder_id=None):
     """
-    Walk the agendas folder structure:
-    - root_folder_id: Drive folder ID (default from env GOOGLE_DRIVE_AGENDAS_FOLDER_ID).
-    - Direct children of root = subfolders (e.g. staff names, project names).
-    - Inside each subfolder: Google Docs only; extract action items per doc.
+    Walk 3-level agendas folder structure and extract action items from 2026 docs only.
+    Structure: Root → Category folders (e.g. "Staff Meetings", "Projects") → Person/project folders → Docs
+    Only docs with "2026" in the title are processed; "2025" docs are skipped.
     Returns:
       {
         "by_folder": {
-          "Folder Display Name": [
-            { "doc_name": "...", "doc_id": "...", "doc_link": "...", "items": [...], "error": null or str }
-          ],
+          "Category Name": {
+            "Person/Project Name": [
+              { "doc_name": "...", "doc_id": "...", "doc_link": "...", "items": [...], "error": null or str }
+            ],
+            ...
+          },
           ...
         },
-        "all_items_flat": [ ... ]  # all items with source_folder and source_doc
+        "all_items_flat": [ ... ]  # all items with source_category, source_folder, source_doc
       }
     """
     folder_id = root_folder_id or os.getenv("GOOGLE_DRIVE_AGENDAS_FOLDER_ID")
@@ -171,7 +173,7 @@ def walk_agendas_and_extract(root_folder_id=None):
     all_items_flat = []
 
     try:
-        # List direct children of root = subfolders (people/projects) and files
+        # List direct children of root = category folders (e.g. "Staff Meetings", "Projects")
         children = list_children(folder_id, drive=drive)
     except Exception as e:
         err_msg = str(e)
@@ -187,16 +189,24 @@ def walk_agendas_and_extract(root_folder_id=None):
             "error": f"Drive API error listing folder: {err_msg}. Check folder ID and that the connected Google account has access (including Shared Drives).",
         }
 
-    subfolders = [c for c in children if c.get("mimeType") == MIME_FOLDER]
-    # Docs in root: native Google Docs OR uploaded .docx
-    root_docs = [
-        c for c in children
-        if c.get("mimeType") in (MIME_GOOGLE_DOC, MIME_DOCX)
-    ]
-    print("[Drive extract] Root: %d subfolders, %d docs in root" % (len(subfolders), len(root_docs)), flush=True)
+    def _is_archived_folder(name):
+        """Skip **Archive / *Archive / Archived folders."""
+        if not name:
+            return False
+        n = name.strip().lower()
+        if "archive" not in n:
+            return False
+        if n.startswith("**") or n.startswith("*archive") or "**archive" in n:
+            return True
+        if n.startswith("*") and "archive" in n:
+            return True
+        return False
 
-    def process_doc(file_id, doc_name, folder_name, mime_type=None):
-        print("[Drive extract] Reading doc: %s" % (doc_name[:50] + "..." if len(doc_name) > 50 else doc_name), flush=True)
+    category_folders = [c for c in children if c.get("mimeType") == MIME_FOLDER and not _is_archived_folder(c.get("name", ""))]
+    print("[Drive extract] Root: %d category folders (archived excluded)" % len(category_folders), flush=True)
+
+    def process_doc(file_id, doc_name, category_name, person_folder_name, mime_type=None):
+        print("[Drive extract]     Reading doc: %s" % (doc_name[:50] + "..." if len(doc_name) > 50 else doc_name), flush=True)
         doc_link = f"https://docs.google.com/document/d/{file_id}/edit" if mime_type == MIME_GOOGLE_DOC else f"https://drive.google.com/file/d/{file_id}/view"
         if mime_type == MIME_DOCX:
             text, read_error = get_docx_text(file_id, drive=drive)
@@ -204,50 +214,73 @@ def walk_agendas_and_extract(root_folder_id=None):
             text, read_error = get_doc_text(file_id, drive=drive)
         if not text:
             err = read_error or "Could not read document (empty or unsupported format)"
-            print("[Drive extract]   -> failed: %s" % (err[:80]), flush=True)
+            print("[Drive extract]       -> failed: %s" % (err[:80]), flush=True)
             return {"doc_name": doc_name, "doc_id": file_id, "doc_link": doc_link, "items": [], "error": err}
         try:
-            print("[Drive extract]   -> extracting action items (LLM)...", flush=True)
+            print("[Drive extract]       -> extracting action items (LLM)...", flush=True)
             items = extract_action_items_from_notes_text(text)
-            print("[Drive extract]   -> got %d items" % len(items), flush=True)
+            print("[Drive extract]       -> got %d items" % len(items), flush=True)
         except Exception as e:
             return {"doc_name": doc_name, "doc_id": file_id, "doc_link": doc_link, "items": [], "error": str(e)}
         for it in items:
-            it["source_folder"] = folder_name
+            it["source_category"] = category_name
+            it["source_folder"] = person_folder_name
             it["source_doc"] = doc_name
             it["doc_link"] = doc_link
         return {"doc_name": doc_name, "doc_id": file_id, "doc_link": doc_link, "items": items, "error": None}
 
-    # Docs in root
-    if root_docs:
-        by_folder["(Root)"] = []
-        for f in root_docs:
-            mime = f.get("mimeType") or MIME_GOOGLE_DOC
-            out = process_doc(f["id"], f.get("name", "Untitled"), "(Root)", mime_type=mime)
-            by_folder["(Root)"].append(out)
-            all_items_flat.extend(out["items"])
+    # Walk 3 levels: Root → Category folders → (direct docs + person/project folders) → Docs (2026 only)
+    for cat_idx, category in enumerate(category_folders):
+        category_name = category.get("name", "Unnamed Category")
+        print("[Drive extract] Category %d/%d: %s" % (cat_idx + 1, len(category_folders), category_name), flush=True)
+        by_folder[category_name] = {}
 
-    # Each subfolder = person or project (Google Docs and .docx)
-    for i, sub in enumerate(subfolders):
-        folder_name = sub.get("name", "Unnamed")
-        print("[Drive extract] Subfolder %d/%d: %s" % (i + 1, len(subfolders), folder_name), flush=True)
-        by_folder[folder_name] = []
-        kids = list_children(sub["id"], drive=drive)
-        docs_in_folder = [c for c in kids if c.get("mimeType") in (MIME_GOOGLE_DOC, MIME_DOCX)]
-        for f in docs_in_folder:
-            mime = f.get("mimeType") or MIME_GOOGLE_DOC
-            out = process_doc(f["id"], f.get("name", "Untitled"), folder_name, mime_type=mime)
-            by_folder[folder_name].append(out)
-            all_items_flat.extend(out["items"])
+        # List all children of this category folder (both subfolders AND docs directly in the category)
+        category_children = list_children(category["id"], drive=drive)
+        person_subfolders = [p for p in category_children if p.get("mimeType") == MIME_FOLDER]
+        direct_docs = [c for c in category_children if c.get("mimeType") in (MIME_GOOGLE_DOC, MIME_DOCX)]
+
+        # 1) Docs directly in the category folder (e.g. "2026 Sunny", "2026 Sandy" in "Dean's office 1:1")
+        direct_docs_2026 = [d for d in direct_docs if "2026" in d.get("name", "") and "2025" not in d.get("name", "")]
+        if direct_docs_2026:
+            section_name = "This folder"
+            print("[Drive extract]   Direct docs in category: %d (filtered for 2026: %d)" % (len(direct_docs), len(direct_docs_2026)), flush=True)
+            by_folder[category_name][section_name] = []
+            for doc in direct_docs_2026:
+                mime = doc.get("mimeType") or MIME_GOOGLE_DOC
+                out = process_doc(doc["id"], doc.get("name", "Untitled"), category_name, section_name, mime_type=mime)
+                by_folder[category_name][section_name].append(out)
+                all_items_flat.extend(out["items"])
+
+        # 2) Person/project subfolders → docs inside each (2026 only); skip archived
+        person_subfolders = [p for p in person_subfolders if not _is_archived_folder(p.get("name", ""))]
+        for person_idx, person_folder in enumerate(person_subfolders):
+            person_name = person_folder.get("name", "Unnamed")
+            print("[Drive extract]   Person folder %d/%d: %s" % (person_idx + 1, len(person_subfolders), person_name), flush=True)
+            by_folder[category_name][person_name] = []
+
+            docs_children = list_children(person_folder["id"], drive=drive)
+            docs_in_folder = [c for c in docs_children if c.get("mimeType") in (MIME_GOOGLE_DOC, MIME_DOCX)]
+            docs_2026 = [d for d in docs_in_folder if "2026" in d.get("name", "") and "2025" not in d.get("name", "")]
+            print("[Drive extract]     Found %d docs (filtered for 2026: %d)" % (len(docs_in_folder), len(docs_2026)), flush=True)
+
+            for doc in docs_2026:
+                mime = doc.get("mimeType") or MIME_GOOGLE_DOC
+                out = process_doc(doc["id"], doc.get("name", "Untitled"), category_name, person_name, mime_type=mime)
+                by_folder[category_name][person_name].append(out)
+                all_items_flat.extend(out["items"])
 
     # Diagnostics
-    total_docs = sum(len(entries) for entries in by_folder.values())
+    total_docs = sum(
+        len(docs)
+        for category_dict in by_folder.values()
+        for docs in category_dict.values()
+    )
     return {
         "by_folder": by_folder,
         "all_items_flat": all_items_flat,
         "stats": {
-            "subfolders_found": len(subfolders),
-            "docs_in_root": len(root_docs),
+            "category_folders": len(category_folders),
             "total_docs_processed": total_docs,
         },
     }
