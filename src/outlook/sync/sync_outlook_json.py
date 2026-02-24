@@ -24,6 +24,7 @@ def sync_emails_to_json(output_path):
             "category": e.get("category"),
             "priority": e.get("priority"),
             "date": e.get("received_at"),
+            "from_paola_or_cc": True,  # Sync only fetches these; so all stored emails pass the filter
             # Defaults for dashboard UX
             "reply_instruction": e.get("reply_instruction", ""),
             "draft_status": e.get("draft_status", "new"),

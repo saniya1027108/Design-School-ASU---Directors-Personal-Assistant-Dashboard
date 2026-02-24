@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import json
 import uuid
@@ -10,6 +10,15 @@ import sys
 SRC_DIR = Path(__file__).parent.parent  # <project>/src
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
+
+# Load .env from src/ so PAOLA_EMAIL, ACTION_ITEM_ONE_ON_ONE_DAY_LIMIT available when running from dashboard/
+try:
+    from dotenv import load_dotenv
+    _env = SRC_DIR / ".env"
+    if _env.exists():
+        load_dotenv(dotenv_path=_env, override=True)
+except Exception:
+    pass
 
 # Use the dashboard's templates folder explicitly (do not fall back to top-level templates)
 TEMPLATE_FOLDER = (SRC_DIR / "dashboard" / "templates").resolve()
@@ -56,6 +65,101 @@ def save_json(path, data):
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+
+
+# --- Action items: filter for Mireille/MNM, one-on-one with Paola reminder ---
+def _mireille_aliases():
+    """Names/aliases for Mireille (e.g. MNM in agendas)."""
+    return ["mireille", "mnm", "mgibbons", "m.malic", "malic"]
+
+
+def _is_action_item_for_mireille(item):
+    """Only show action items that mention Mireille or MNM (in text, context, or owner)."""
+    aliases = _mireille_aliases()
+    combined = " ".join(
+        str(x) for x in [
+            item.get("text") or "",
+            item.get("context") or "",
+            item.get("owner") or "",
+            item.get("owner_email") or "",
+        ]
+    ).lower()
+    return any(a in combined for a in aliases)
+
+
+def _is_one_on_one_with_paola(item):
+    """Detect if item is from a Paola/Mireille one-on-one context."""
+    combined = " ".join(
+        str(x) for x in [
+            item.get("text") or "",
+            item.get("context") or "",
+            item.get("source", ""),
+        ]
+    ).lower()
+    if "paola" not in combined:
+        return False
+    one_on_one_markers = ["1:1", "1-1", "one on one", "one-on-one", "paola/mireille", "paola & mireille"]
+    return any(m in combined for m in one_on_one_markers)
+
+
+def _action_item_needs_reminder(item, day_limit):
+    """One-on-one with Paola item still todo after day_limit days (by due date) -> needs reminder / pop to top."""
+    if (item.get("status") or "todo").lower() != "todo":
+        return False
+    if not _is_one_on_one_with_paola(item):
+        return False
+    due = item.get("due_date")
+    if not due:
+        return True  # No due date: treat as "pop to top" for one-on-one todo
+    try:
+        due_dt = datetime.strptime(due[:10], "%Y-%m-%d").date()
+        limit_date = (datetime.now().date() - timedelta(days=day_limit))
+        return due_dt < limit_date
+    except Exception:
+        return False
+
+
+def _sort_action_items_with_reminders(items, day_limit):
+    """Sort: one-on-one overdue (needs_reminder) first, then other todo, then done. Add needs_reminder flag."""
+    for it in items:
+        it["needs_reminder"] = day_limit and _action_item_needs_reminder(it, day_limit)
+
+    def sort_key(it):
+        status = (it.get("status") or "todo").lower()
+        is_reminder = it.get("needs_reminder")
+        is_one_on_one = _is_one_on_one_with_paola(it)
+        # needs_reminder one-on-one todo at top, then one-on-one todo, then other todo, then done
+        if status != "todo":
+            return (2, 0, it.get("due_date") or "")
+        if is_reminder:
+            return (0, 0, it.get("due_date") or "")
+        if is_one_on_one:
+            return (1, 0, it.get("due_date") or "")
+        return (1, 1, it.get("due_date") or "")
+
+    return sorted(items, key=sort_key)
+
+
+def _filter_and_sort_action_items(raw_items):
+    """Filter to Mireille/MNM-relevant items; add reminder flag and sort (one-on-one overdue on top)."""
+    day_limit = int(os.getenv("ACTION_ITEM_ONE_ON_ONE_DAY_LIMIT", "7") or "0")
+    filtered = [i for i in raw_items if _is_action_item_for_mireille(i)]
+    return _sort_action_items_with_reminders(filtered, day_limit)
+
+
+def _filter_emails_paola_or_cc(emails):
+    """Only show emails from Paola or where Mireille is CC'd (stored as from_paola_or_cc, or sender == PAOLA_EMAIL for old records)."""
+    paola = (os.getenv("PAOLA_EMAIL") or "").strip().lower()
+    if not paola:
+        return emails
+    out = []
+    for e in emails:
+        if e.get("from_paola_or_cc") is True:
+            out.append(e)
+        elif (e.get("email") or "").strip().lower() == paola:
+            out.append(e)
+    return out
+
 
 # --- Import your pipeline sync/extract functions ---
 from outlook.sync.sync_outlook_json import sync_emails_to_json
@@ -241,13 +345,14 @@ def _sort_key_due_first(item):
 @app.route("/")
 @login_required
 def dashboard():
-    emails = load_json(EMAILS_JSON)
-    action_items = load_json(ACTION_ITEMS_JSON)
+    emails = _filter_emails_paola_or_cc(load_json(EMAILS_JSON))
+    raw_action_items = load_json(ACTION_ITEMS_JSON)
+    action_items = _filter_and_sort_action_items(raw_action_items)
     drafts = load_json(DRAFTS_JSON)
-    # Dashboard shows only 10 to-do and 10 done, sorted by due date (dated first, then no date)
+    # Dashboard shows only 10 to-do and 10 done, sorted (one-on-one overdue first, then by due date)
     todo_only = [i for i in action_items if (i.get("status") or "todo").lower() == "todo"]
     done_only = [i for i in action_items if (i.get("status") or "").lower() == "done"]
-    dashboard_todo_items = sorted(todo_only, key=_sort_key_due_first)[:10]
+    dashboard_todo_items = todo_only[:10]
     dashboard_done_items = sorted(done_only, key=_sort_key_due_first)[:10]
     calendar_connected = HAS_GOOGLE_CALENDAR and calendar_is_connected() if HAS_GOOGLE_CALENDAR else False
     calendar_configured = HAS_GOOGLE_CALENDAR and calendar_is_configured() if HAS_GOOGLE_CALENDAR else False
@@ -509,7 +614,7 @@ def api_drive_agendas_extract():
 @app.route("/emails_full")
 @login_required
 def emails_full():
-    emails = load_json(EMAILS_JSON)
+    emails = _filter_emails_paola_or_cc(load_json(EMAILS_JSON))
     drafts = load_json(DRAFTS_JSON)
 
     # Build map of latest draft by email_id for quick lookup in template
@@ -523,8 +628,9 @@ def emails_full():
 @app.route("/action_items_full")
 @login_required
 def action_items_full():
-    action_items = load_json(ACTION_ITEMS_JSON)
-    # Group by status for Kanban
+    raw = load_json(ACTION_ITEMS_JSON)
+    action_items = _filter_and_sort_action_items(raw)
+    # Group by status for Kanban (one-on-one overdue already at top of todo)
     grouped = {"todo": [], "done": [], "pending": [], "other": []}
     for item in action_items:
         status = (item.get("status") or "todo").lower()
@@ -532,8 +638,7 @@ def action_items_full():
             grouped[status].append(item)
         else:
             grouped["other"].append(item)
-    return render_template("actio" \
-    "n_items_full.html", grouped=grouped)
+    return render_template("action_items_full.html", grouped=grouped)
 
 @app.route("/sync_emails", methods=["POST"])
 @login_required
@@ -550,12 +655,13 @@ def extract_action_items():
 @app.route("/emails")
 @login_required
 def get_emails():
-    return jsonify(load_json(EMAILS_JSON))
+    return jsonify(_filter_emails_paola_or_cc(load_json(EMAILS_JSON)))
 
 @app.route("/action_items")
 @login_required
 def get_action_items():
-    return jsonify(load_json(ACTION_ITEMS_JSON))
+    raw = load_json(ACTION_ITEMS_JSON)
+    return jsonify(_filter_and_sort_action_items(raw))
 
 @app.route("/drafts")
 @login_required

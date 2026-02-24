@@ -167,8 +167,10 @@ def join_paragraphs(pars: List[Dict]) -> str:
 # =========================
 
 # IMPORTANT: Escape braces {{ }} because we use .format(meeting_text=...)
+# Note: "MNM" is a pseudonym for Mireille in agendas; treat it as the same person when extracting owner/assignee.
 EXTRACTION_PROMPT_TEMPLATE = """
 You are a JSON-only extractor. Extract action items from the meeting notes below.
+If the notes use "MNM" or "Mireille", they refer to the same person (Mireille); use "Mireille" as owner name when appropriate.
 
 Each line begins with a paragraph index and a status hint tag:
 - If tagged [DONE], the extracted action item MUST have "status": "done"
@@ -196,9 +198,11 @@ Important: Return only valid JSON array. If there are no action items, return []
 """
 
 # For raw meeting notes (no paragraph index / status tags) - e.g. from web note-taking tool
+# "MNM" in notes is a pseudonym for Mireille; use "Mireille" as owner when appropriate.
 EXTRACTION_PROMPT_RAW_NOTES = """
 You are a JSON-only extractor. Extract action items and to-dos from the meeting notes below.
 The notes are free-form (agendas, discussion points, decisions). Identify any actionable items, tasks, or to-dos.
+If the notes mention "MNM" or "Mireille", they refer to the same person; use "Mireille" as owner when the task is for her.
 
 Return a JSON array of objects exactly like:
 [

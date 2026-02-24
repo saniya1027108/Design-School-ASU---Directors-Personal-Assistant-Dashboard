@@ -167,7 +167,8 @@
         <div class="card-header fw-semibold" style="color: var(--text-primary);">To do</div>
         <div class="card-body">
           {% for item in dashboard_todo_items %}
-            <div class="border-start border-3 todo-item ps-2 py-2 mb-2 rounded" style="background: var(--card-bg);">
+            <div class="border-start border-3 todo-item ps-2 py-2 mb-2 rounded {% if item.needs_reminder %}border-warning{% endif %}" style="background: var(--card-bg);">
+              {% if item.needs_reminder %}<span class="badge bg-warning text-dark me-1">Reminder</span>{% endif %}
               <div class="fw-medium">{{ item.text }}</div>
               <div class="text-muted small mt-1">
                 {% if item.source_folder or item.source_category or item.source %}<span class="me-2">📁 {{ item.source_folder or item.source_category or item.source }}</span>{% endif %}

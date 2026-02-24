@@ -19,6 +19,10 @@ This document describes the **entire pipeline** for the Design School ASU Direct
 
 ## Overview
 
+The following diagram summarizes the pipeline: email (Outlook/Microsoft Graph), calendar (Google Calendar), and agendas/to-do (Google Drive → LLM extraction) feeding into the Personalized Dashboard and Kanban Board.
+
+![Personalized Dashboard pipeline diagram](assets/personalized-dashboard.png)
+
 The system is an **AI-powered executive assistant** that:
 
 - **Syncs Outlook emails** into the dashboard and supports human-in-the-loop draft replies (LLM) and send-back via Microsoft Graph.

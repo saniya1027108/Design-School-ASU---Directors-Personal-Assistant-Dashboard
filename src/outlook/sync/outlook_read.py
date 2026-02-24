@@ -16,13 +16,23 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 # -----------------------------------------------------
 
+import time
 import requests
 from dotenv import load_dotenv
 from outlook.utils.outlook_auth import get_token
 
-load_dotenv()
+# Load .env from src/ when running from dashboard/
+_src_dir = current_file.parent.parent.parent
+_env_path = _src_dir / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path, override=True)
+else:
+    load_dotenv()
 
 USER = os.getenv("OUTLOOK_USER")
+# Director/Paola email: only fetch emails from Paola OR emails where Mireille (USER) is CC'd
+PAOLA_EMAIL = (os.getenv("PAOLA_EMAIL") or "").strip()
+OUTLOOK_FETCH_TOP = int(os.getenv("OUTLOOK_FETCH_TOP", "50"))
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 domain = USER.split('@')[-1] if USER else ""
@@ -90,7 +100,8 @@ def _parse_message(m):
     snippet = m.get("bodyPreview", "") or ""
     message_id = m.get("id")
     received_at = m.get("receivedDateTime")
-    full_body = m.get("body", {}).get("content", "") or snippet
+    # Use body if present (single-message fetch), else bodyPreview to avoid heavy list calls
+    full_body = m.get("body", {}).get("content", "") if m.get("body") else snippet
     category, priority = determine_category_and_priority(sender_email, subject, snippet, full_body)
     return {
         "subject": subject,
@@ -106,26 +117,65 @@ def _parse_message(m):
 
 
 def fetch_unread_emails():
-    """Fetch all unread emails from inbox using Graph API pagination."""
+    """Fetch unread emails from inbox using Graph API. Only returns: from Paola OR where Mireille (USER) is in CC."""
+    # Re-load env so PAOLA_EMAIL and USER are set even if module was imported before .env existed
+    if _env_path.exists():
+        load_dotenv(dotenv_path=_env_path, override=True)
+    user_lower = (os.getenv("OUTLOOK_USER") or USER or "").strip().lower()
+    paola_lower = (os.getenv("PAOLA_EMAIL") or PAOLA_EMAIL or "").strip().lower()
+
     token = get_token()
     headers = {"Authorization": f"Bearer {token}"}
-    page_size = 500
+    # Request only metadata + bodyPreview (no full body) so the list call stays fast and avoids 504
+    # Include toRecipients, ccRecipients for filtering: from Paola OR Mireille (USER) in CC
+    fetch_top = int(os.getenv("OUTLOOK_FETCH_TOP", "50") or "50")
+    page_size = min(fetch_top, 100)
     url = (
         f"{GRAPH_BASE}/me/messages"
         f"?$filter=isRead eq false"
         f"&$top={page_size}"
-        f"&$select=id,subject,from,bodyPreview,receivedDateTime,body"
+        f"&$select=id,subject,from,bodyPreview,receivedDateTime,toRecipients,ccRecipients"
         f"&$orderby=receivedDateTime desc"
     )
     parsed = []
+    timeout_sec = 90
+    max_retries = 3
+
+    def _keep_message(msg):
+        """Only keep: from Paola, or emails where Mireille (USER) is in CC."""
+        if not paola_lower and not user_lower:
+            return True
+        sender = (msg.get("from") or {}).get("emailAddress") or {}
+        from_addr = (sender.get("address") or "").strip().lower()
+        if paola_lower and from_addr == paola_lower:
+            return True
+        cc_list = msg.get("ccRecipients") or []
+        cc_addrs = [
+            (r.get("emailAddress") or {}).get("address", "") or ""
+            for r in cc_list
+        ]
+        if user_lower and any(addr.strip().lower() == user_lower for addr in cc_addrs if addr):
+            return True
+        return False
 
     while url:
-        resp = requests.get(url, headers=headers, timeout=60)
-        resp.raise_for_status()
+        for attempt in range(max_retries):
+            try:
+                resp = requests.get(url, headers=headers, timeout=timeout_sec)
+                resp.raise_for_status()
+                break
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code in (502, 503, 504) and attempt < max_retries - 1:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                raise
         data = resp.json()
         mails = data.get("value", [])
         for m in mails:
-            parsed.append(_parse_message(m))
+            if not paola_lower and not user_lower:
+                parsed.append(_parse_message(m))
+            elif _keep_message(m):
+                parsed.append(_parse_message(m))
         url = data.get("@odata.nextLink")
 
     return parsed

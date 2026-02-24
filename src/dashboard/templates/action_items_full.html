@@ -19,8 +19,11 @@
     <div class="row g-3">
       {% for it in items %}
         <div class="col-md-6">
-          <div class="card ai-card">
+          <div class="card ai-card {% if it.needs_reminder %}border-warning{% endif %}">
             <div class="card-body">
+              {% if it.needs_reminder %}
+              <p class="mb-1"><span class="badge bg-warning text-dark">Reminder: One-on-one with Paola – please complete or update</span></p>
+              {% endif %}
               <div class="d-flex justify-content-between">
                 <div style="max-width:80%"><h6 class="card-title mb-1">{{ it.text }}</h6></div>
                 <div><button class="btn btn-sm btn-outline-success mark-done-btn" data-paragraph="{{ it.paragraph_index }}">Mark Done</button></div>
