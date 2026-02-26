@@ -1,16 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Dashboard - Personal Assistant{% endblock %}
 {% block extra_css %}
-.calendar-wrap { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; box-shadow: var(--shadow-sm); overflow: hidden; border-left: 6px solid var(--color-calendar-accent); }
+.calendar-wrap { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px; box-shadow: var(--shadow-sm); border-left: 6px solid var(--color-calendar-accent); overflow: visible; }
 .calendar-header { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; background: linear-gradient(90deg, var(--color-calendar-bg), transparent); border-bottom: 1px solid var(--border-neutral); }
 .calendar-header h3 { margin: 0; font-size: 1.2rem; font-weight: 600; }
-.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); width: 100%; }
+#calendar-grid-holder { width: 100%; min-width: 0; overflow-x: auto; overflow-y: visible; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); width: 100%; min-width: 700px; }
 .calendar-weekday { padding: 0.4rem; text-align: center; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-neutral); background: var(--accent-light); }
-.calendar-day { min-height: 88px; padding: 0.35rem; border: 1px solid var(--border-neutral); background: var(--card-bg); font-size: 0.9rem; }
+.calendar-day { min-height: 100px; padding: 0.35rem; border: 1px solid var(--border-neutral); background: var(--card-bg); font-size: 0.9rem; overflow: visible; }
 .calendar-day.other-month { background: #fafafa; color: var(--text-muted); }
 .calendar-day.today { background: #f0fdf4; border-color: #15803d; }
 .calendar-day-num { font-weight: 600; margin-bottom: 0.25rem; }
-.calendar-day-events { list-style: none; padding: 0; margin: 0; }
+.calendar-day-events { list-style: none; padding: 0; margin: 0; max-height: 8em; overflow-y: auto; }
 .calendar-day-events li { font-size: 0.75rem; padding: 0.15rem 0.25rem; margin-bottom: 0.2rem; background: var(--accent-light); border-radius: 4px; border-left: 3px solid var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-day-events li.all-day { border-left-color: #15803d; }
 .calendar-day-events li { cursor: pointer; }

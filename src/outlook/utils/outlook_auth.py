@@ -7,14 +7,20 @@ import time
 import requests
 from dotenv import load_dotenv
 
-# ...existing code for sys.path, etc...
-
-load_dotenv()
+# Load .env from project src/ so it works when running from dashboard/ or any CWD
+_src_dir = Path(__file__).resolve().parent.parent.parent
+_env_path = _src_dir / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path, override=True)
+else:
+    load_dotenv(override=False)
 
 USER = os.getenv("OUTLOOK_USER")
 CLIENT_ID = os.getenv("OUTLOOK_CLIENT_ID") or "26895341-d03d-4265-a82b-ed2e66508294"  # fallback to your client id
 TOKEN_CACHE_PATH = Path(__file__).parent.parent / "config" / "outlook_token_cache.json"
-AUTHORITY = "https://login.microsoftonline.com/common"
+# Use tenant-specific authority when OUTLOOK_TENANT_ID is set (avoids 401 with single-tenant apps)
+_tenant = os.getenv("OUTLOOK_TENANT_ID", "").strip()
+AUTHORITY = f"https://login.microsoftonline.com/{_tenant}" if _tenant else "https://login.microsoftonline.com/common"
 SCOPE = ["Mail.Read", "Mail.ReadWrite", "Mail.Send", "User.Read", "email", "openid", "profile"]
 
 def load_token_cache():
@@ -85,6 +91,19 @@ def device_code_auth():
         "scope": " ".join(SCOPE)
     }
     resp = requests.post(f"{AUTHORITY}/oauth2/v2.0/devicecode", data=data)
+    if resp.status_code == 401:
+        body = resp.text
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        raise Exception(
+            "Outlook device code 401: Azure rejected the client. "
+            "Most often this is because the app has a client secret but 'Allow public client flows' is No. "
+            "Fix: Azure Portal → App registrations → your app → Authentication → Advanced settings → "
+            "set 'Allow public client flows' to Yes, then Save. "
+            f"Authority used: {AUTHORITY}. Response: {body}"
+        )
     resp.raise_for_status()
     device_code_info = resp.json()
     print(f"To authenticate, visit {device_code_info['verification_uri']} and enter code: {device_code_info['user_code']}")

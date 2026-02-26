@@ -1,8 +1,8 @@
 """
 Google Calendar integration: OAuth2 and fetch events for monthly view.
 Requires: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET in .env
-Optional: GOOGLE_CALENDAR_ID (default "primary")
-Token stored in data/google_calendar_token.json after first OAuth.
+Optional: GOOGLE_CALENDAR_ID (default "primary"), GOOGLE_CALENDAR_TOKEN_FILE (token filename, e.g. google_calendar_token_mireille.json)
+Token stored in data/<GOOGLE_CALENDAR_TOKEN_FILE> or data/google_calendar_token.json after first OAuth.
 """
 
 import os
@@ -12,12 +12,25 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 # Paths
 SRC_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = SRC_DIR / "data"
-TOKEN_PATH = DATA_DIR / "google_calendar_token.json"
+_env_path = SRC_DIR / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path, override=True)
+else:
+    load_dotenv()
+
+
+def _get_token_path():
+    """Use GOOGLE_CALENDAR_TOKEN_FILE from .env so different users (e.g. Mireille) can have a dedicated token."""
+    custom = (os.getenv("GOOGLE_CALENDAR_TOKEN_FILE") or "").strip()
+    if custom:
+        p = Path(custom)
+        if not p.is_absolute():
+            p = DATA_DIR / p
+        return p
+    return DATA_DIR / "google_calendar_token.json"
 
 # Scopes: calendar.events + Drive/Docs read (for agendas folder)
 SCOPES = [
@@ -94,7 +107,9 @@ def exchange_code_for_token(code):
         "scopes": SCOPES,
     }
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(TOKEN_PATH, "w", encoding="utf-8") as f:
+    token_path = _get_token_path()
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(token_path, "w", encoding="utf-8") as f:
         json.dump(creds_dict, f, indent=2)
     return True
 
@@ -106,10 +121,11 @@ def get_credentials():
         from google.auth.transport.requests import Request
     except ImportError:
         return None
-    if not TOKEN_PATH.exists():
+    token_path = _get_token_path()
+    if not token_path.exists():
         return None
     try:
-        with open(TOKEN_PATH, "r", encoding="utf-8") as f:
+        with open(token_path, "r", encoding="utf-8") as f:
             creds_dict = json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
@@ -124,7 +140,7 @@ def get_credentials():
     if creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-            with open(TOKEN_PATH, "w", encoding="utf-8") as f:
+            with open(token_path, "w", encoding="utf-8") as f:
                 json.dump({
                     "token": creds.token,
                     "refresh_token": creds.refresh_token,

@@ -140,10 +140,22 @@ def _sort_action_items_with_reminders(items, day_limit):
     return sorted(items, key=sort_key)
 
 
+def _is_from_archived_source(item):
+    """Exclude action items that came from archived folders (e.g. **Archived Staff 1:1 agendas)."""
+    combined = " ".join(
+        str(x) for x in [
+            item.get("source_category") or "",
+            item.get("source_folder") or "",
+            item.get("source") or "",
+        ]
+    ).lower()
+    return "archived" in combined
+
+
 def _filter_and_sort_action_items(raw_items):
-    """Filter to Mireille/MNM-relevant items; add reminder flag and sort (one-on-one overdue on top)."""
+    """Filter to Mireille/MNM-relevant items; exclude archived sources; add reminder flag and sort (one-on-one overdue on top)."""
     day_limit = int(os.getenv("ACTION_ITEM_ONE_ON_ONE_DAY_LIMIT", "7") or "0")
-    filtered = [i for i in raw_items if _is_action_item_for_mireille(i)]
+    filtered = [i for i in raw_items if _is_action_item_for_mireille(i) and not _is_from_archived_source(i)]
     return _sort_action_items_with_reminders(filtered, day_limit)
 
 
@@ -230,10 +242,12 @@ def save_drive_agendas(data):
 
 
 def _is_archived_name(name):
-    """Match **Archive / *Archive / Archived folder names for filtering from UI."""
+    """Match folder names containing 'Archived', or **Archive / *Archive patterns for filtering from UI."""
     if not name or not isinstance(name, str):
         return False
     n = name.strip().lower()
+    if "archived" in n:
+        return True
     if "archive" not in n:
         return False
     if n.startswith("**") or "**archive" in n or (n.startswith("*") and "archive" in n):
@@ -582,7 +596,9 @@ def api_drive_agendas_extract():
     if not HAS_DRIVE_AGENDAS:
         return jsonify({"success": False, "error": "Drive agendas module not available"}), 500
     data = request.json or {}
-    folder_id = data.get("folder_id") or os.getenv("GOOGLE_DRIVE_AGENDAS_FOLDER_ID")
+    # Default Drive agendas folder ID (same folder used every time unless overridden in .env or request)
+    DEFAULT_DRIVE_AGENDAS_FOLDER_ID = "0AGMl92cnmAguUk9PVA"
+    folder_id = data.get("folder_id") or os.getenv("GOOGLE_DRIVE_AGENDAS_FOLDER_ID") or DEFAULT_DRIVE_AGENDAS_FOLDER_ID
     if not folder_id:
         return jsonify({"success": False, "error": "Folder ID required. Set GOOGLE_DRIVE_AGENDAS_FOLDER_ID in .env or pass folder_id in the request."}), 400
     print("[Drive extract] Starting walk_agendas_and_extract for folder_id=%s..." % (folder_id[:20] + "..." if len(folder_id) > 20 else folder_id), flush=True)

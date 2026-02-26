@@ -154,7 +154,9 @@ def walk_agendas_and_extract(root_folder_id=None):
         "all_items_flat": [ ... ]  # all items with source_category, source_folder, source_doc
       }
     """
-    folder_id = root_folder_id or os.getenv("GOOGLE_DRIVE_AGENDAS_FOLDER_ID")
+    # Default folder ID so the same Drive folder is always used unless overridden via env or request
+    DEFAULT_AGENDAS_FOLDER_ID = "0AGMl92cnmAguUk9PVA"
+    folder_id = root_folder_id or os.getenv("GOOGLE_DRIVE_AGENDAS_FOLDER_ID") or DEFAULT_AGENDAS_FOLDER_ID
     if not folder_id:
         return {"by_folder": {}, "all_items_flat": [], "error": "GOOGLE_DRIVE_AGENDAS_FOLDER_ID not set"}
 
@@ -190,10 +192,12 @@ def walk_agendas_and_extract(root_folder_id=None):
         }
 
     def _is_archived_folder(name):
-        """Skip **Archive / *Archive / Archived folders."""
+        """Skip folders whose name contains 'Archived', or **Archive / *Archive patterns."""
         if not name:
             return False
         n = name.strip().lower()
+        if "archived" in n:
+            return True
         if "archive" not in n:
             return False
         if n.startswith("**") or n.startswith("*archive") or "**archive" in n:
